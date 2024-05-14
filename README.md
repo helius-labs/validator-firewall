@@ -30,3 +30,8 @@ cargo build
 ```bash
 RUST_LOG=info cargo xtask run -- --iface <iface> --static_overrides <path_to_static_overrides.yaml> -p 8004 -p 8005 -p 8006
 ```
+
+
+## Production
+This should be run under a user with the CAP_NET_ADMIN capability. This is required to load the eBPF program and to set the XDP program on the interface.
+
