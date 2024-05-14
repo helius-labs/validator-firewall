@@ -1,5 +1,7 @@
 # validator-firewall
 
+Low level blocking for validator nodes. This project is a work in progress and interfaces may change.
+
 ## Prerequisites
 
 1. Install bpf-linker: `cargo install bpf-linker`
@@ -8,6 +10,24 @@
 ```
 sudo apt install linux-tools-5.8.0-63-generic
 export PATH=/usr/lib/linux-tools/5.8.0-63-generic:$PATH
+```
+
+## General Structure
+
+The project is split into two main components: the eBPF program and the userspace program.  The eBPF program is linked
+into the userspace program and is loaded into the kernel. The userspace program is responsible for setting up the eBPF 
+maps (shared memory between the eBPF program and the userspace program), pushing in external data, and reporting stats.
+
+By default, all non-gossip traffic is blocked on the specified ports.  An additional set of hosts can be specified in a
+static overrides file.  This file is a YAML file that contains a list of IP addresses that should be allowed to bypass 
+the firewall.  The format is as follows:
+
+```yaml
+nodes:
+  - name: "host1"
+    address: 1.2.3.4
+  - name: "host2"
+    address: 4.5.6.7
 ```
 
 ## Build eBPF
