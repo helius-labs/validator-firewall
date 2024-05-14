@@ -16,12 +16,11 @@ use log::{debug, info, warn};
 use serde::Deserialize;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use std::collections::HashSet;
-use std::net::{Ipv4Addr, SocketAddr};
+use std::net::{Ipv4Addr};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tokio::signal;
-use tokio::sync::Mutex;
 
 #[derive(Debug, Parser)]
 struct HVFConfig {

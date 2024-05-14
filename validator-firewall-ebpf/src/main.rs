@@ -93,7 +93,7 @@ fn try_process_packet(ctx: XdpContext) -> Result<u32, ()> {
         //Traffic above here is other OS traffic, not counted in our stats
         increment_counter(source_addr, &ALL_TRAFFIC_STATS);
         let action = if is_allow_listed(source_addr) {
-            info!(
+            debug!(
                 &ctx,
                 "ALLOW SRC IP: {:i}, DEST PORT: {}",
                 source_addr,
@@ -101,7 +101,7 @@ fn try_process_packet(ctx: XdpContext) -> Result<u32, ()> {
             );
             xdp_action::XDP_PASS
         } else {
-            info!(
+            debug!(
                 &ctx,
                 "DROP SRC IP: {:i}, DEST PORT: {}",
                 source_addr,

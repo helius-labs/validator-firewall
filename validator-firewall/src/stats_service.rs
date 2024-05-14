@@ -1,4 +1,3 @@
-use aya::maps::Map::PerCpuLruHashMap;
 use aya::maps::{Map, PerCpuHashMap};
 use log::info;
 use std::sync::atomic::{AtomicBool, Ordering};

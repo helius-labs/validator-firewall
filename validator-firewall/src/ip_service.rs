@@ -1,4 +1,4 @@
-use aya::maps::{HashMap, Map, MapData};
+use aya::maps::{HashMap, Map};
 use log::debug;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use std::collections::HashSet;
@@ -6,7 +6,6 @@ use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::Mutex;
 use tokio::time::sleep;
 
 pub struct GossipWatcher {
