@@ -1,6 +1,9 @@
-# validator-firewall
+# Helius Validator Firewall
 
 Low level blocking for validator nodes. This project is a work in progress and interfaces may change.
+
+![arch diagram](./validator_firewall.png)
+
 
 ## Prerequisites
 
