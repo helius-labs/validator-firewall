@@ -1,0 +1,2 @@
+[workspace]
+members = ["xtask", "validator-firewall", "validator-firewall-common"]
