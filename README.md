@@ -7,8 +7,9 @@ Low level blocking for validator nodes. This project is a work in progress and i
 
 ## Prerequisites
 
-1. Install bpf-linker: `cargo install bpf-linker`
-2. If you're running on Ubuntu 20.04, there is a bug with bpftool and the default kernel installed by the distribution. To avoid running into it, you can install a newer bpftool version that does not include the bug with:
+1. Install nightly components: `rustup toolchain install nightly --component rust-src`
+2. Install bpf-linker: `cargo install bpf-linker`
+3. If you're running on Ubuntu 20.04, there is a bug with bpftool and the default kernel installed by the distribution. To avoid running into it, you can install a newer bpftool version that does not include the bug with:
 
 ```
 sudo apt install linux-tools-5.8.0-63-generic

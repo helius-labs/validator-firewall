@@ -7,7 +7,7 @@ use aya_ebpf::{
     maps::{HashMap, PerCpuHashMap},
     programs::XdpContext,
 };
-use aya_log_ebpf::{info, trace};
+use aya_log_ebpf::{info, debug, trace, error};
 
 use core::mem;
 use network_types::{
@@ -30,9 +30,12 @@ static PROTECTED_PORTS: HashMap<u16, u8> = HashMap::<u16, u8>::with_max_entries(
 
 #[xdp]
 pub fn validator_firewall(ctx: XdpContext) -> u32 {
-    match try_process_packet(ctx) {
+    match try_process_packet(&ctx) {
         Ok(ret) => ret,
-        Err(_) => xdp_action::XDP_ABORTED,
+        Err(_) => {
+            error!(&ctx, "Error processing packet!");
+            xdp_action::XDP_PASS
+        },
     }
 }
 
@@ -74,7 +77,7 @@ fn ptr_at<T>(ctx: &XdpContext, offset: usize) -> Result<*const T, ()> {
 }
 
 #[inline(always)]
-fn try_process_packet(ctx: XdpContext) -> Result<u32, ()> {
+fn try_process_packet(ctx: &XdpContext) -> Result<u32, ()> {
     // info!(&ctx, "Processing packet");
     let eth_header: *const EthHdr = ptr_at(&ctx, 0)?;
     if let EtherType::Ipv6 = unsafe { (*eth_header).ether_type } {
@@ -94,7 +97,7 @@ fn try_process_packet(ctx: XdpContext) -> Result<u32, ()> {
         increment_counter(source_addr, &ALL_TRAFFIC_STATS);
         let action = if is_allow_listed(source_addr) {
             debug!(
-                &ctx,
+                ctx,
                 "ALLOW SRC IP: {:i}, DEST PORT: {}",
                 source_addr,
                 dest_port
@@ -102,7 +105,7 @@ fn try_process_packet(ctx: XdpContext) -> Result<u32, ()> {
             xdp_action::XDP_PASS
         } else {
             debug!(
-                &ctx,
+                ctx,
                 "DROP SRC IP: {:i}, DEST PORT: {}",
                 source_addr,
                 dest_port
