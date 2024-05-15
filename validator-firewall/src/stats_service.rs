@@ -45,7 +45,12 @@ impl StatsService {
                 all_sum += total;
                 info!("total_packets: {:?} = {:?}", native_addr, total);
             }
-            info!("All traffic summary: {} pkts {} pkts/s", all_sum, (all_sum - all_last_sum) / all_las_eval_time.elapsed().as_secs());
+            info!(
+                "All traffic summary: {} pkts last_interval {} pkts {} pkts/s",
+                all_sum,
+                all_sum - all_last_sum,
+                (all_sum - all_last_sum) / all_las_eval_time.elapsed().as_secs().max(1)
+            );
             all_last_sum = all_sum;
             all_las_eval_time = std::time::Instant::now();
 
@@ -56,7 +61,12 @@ impl StatsService {
                 blocked_sum += total;
                 info!("dropped_packets: {:?} = {:?}", native_addr, total);
             }
-            info!("Blocked traffic summary: {} pkts {} pkts/s", blocked_sum, (blocked_sum - blocked_last_sum) / blocked_las_eval_time.elapsed().as_secs());
+            info!(
+                "Blocked traffic summary: {} pkts last_interval {} pkts {} pkts/s",
+                blocked_sum,
+                blocked_sum - blocked_last_sum,
+                (blocked_sum - blocked_last_sum) / blocked_las_eval_time.elapsed().as_secs().max(1)
+            );
             blocked_last_sum = blocked_sum;
             blocked_las_eval_time = std::time::Instant::now();
 
