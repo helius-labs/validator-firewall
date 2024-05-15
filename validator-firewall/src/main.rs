@@ -3,7 +3,6 @@ mod stats_service;
 
 use crate::ip_service::GossipWatcher;
 use anyhow::Context;
-use aya::maps::IterableMap;
 use aya::{
     include_bytes_aligned,
     maps::HashMap,
