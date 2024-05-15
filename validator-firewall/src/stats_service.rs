@@ -1,5 +1,6 @@
-use aya::maps::{Map, PerCpuHashMap};
+use aya::maps::{Map, MapData, MapIter, PerCpuHashMap, PerCpuValues};
 use log::info;
+use std::net::Ipv4Addr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -25,6 +26,22 @@ impl StatsService {
         }
     }
 
+    pub fn prepare_stats(
+        map: MapIter<u32, PerCpuValues<u64>, PerCpuHashMap<&MapData, u32, u64>>,
+    ) -> Vec<(Ipv4Addr, u64)> {
+        let mut pairs: Vec<(Ipv4Addr, u64)> = map
+            .filter_map(|res| res.ok())
+            .map(|(addr, per_cpu)| {
+                (
+                    std::net::Ipv4Addr::from(u32::from_ne_bytes(addr.to_ne_bytes())),
+                    per_cpu.iter().sum(),
+                )
+            })
+            .collect();
+        pairs.sort_by(|a, b| b.1.cmp(&a.1));
+        pairs
+    }
+
     pub async fn run(&self) {
         let co_exit = self.exit.clone();
         let all_traffic: PerCpuHashMap<_, u32, u64> =
@@ -36,14 +53,13 @@ impl StatsService {
         let mut blocked_las_eval_time = std::time::Instant::now();
         let mut all_last_sum = 0u64;
         let mut all_las_eval_time = std::time::Instant::now();
+
         while !co_exit.load(Ordering::Relaxed) {
             // Get stats from the maps
             let mut all_sum = 0u64;
-            for (addr, per_cpu_values) in all_traffic.iter().filter_map(|res| res.ok()) {
-                let total: u64 = per_cpu_values.iter().sum();
-                let native_addr = std::net::Ipv4Addr::from(u32::from_ne_bytes(addr.to_ne_bytes()));
+            for (addr, total) in Self::prepare_stats(all_traffic.iter()) {
                 all_sum += total;
-                info!("total_packets: {:?} = {:?}", native_addr, total);
+                info!("total_packets: {:?} = {:?}", addr, total);
             }
             info!(
                 "All traffic summary: {} pkts last_interval {} pkts {} pkts/s",
@@ -55,11 +71,9 @@ impl StatsService {
             all_las_eval_time = std::time::Instant::now();
 
             let mut blocked_sum = 0u64;
-            for (addr, per_cpu_values) in blocked_traffic.iter().filter_map(|res| res.ok()) {
-                let total: u64 = per_cpu_values.iter().sum();
-                let native_addr = std::net::Ipv4Addr::from(u32::from_ne_bytes(addr.to_ne_bytes()));
+            for (addr, total) in Self::prepare_stats(blocked_traffic.iter()) {
                 blocked_sum += total;
-                info!("dropped_packets: {:?} = {:?}", native_addr, total);
+                info!("dropped_packets: {:?} = {:?}", addr, total);
             }
             info!(
                 "Blocked traffic summary: {} pkts last_interval {} pkts {} pkts/s",
