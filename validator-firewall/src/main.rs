@@ -36,7 +36,7 @@ struct HVFConfig {
 #[derive(Deserialize, Debug)]
 struct NameAddressPair {
     name: String,
-    address: Ipv4Addr,
+    ip: Ipv4Addr,
 }
 
 #[derive(Deserialize, Debug)]
@@ -59,7 +59,7 @@ async fn main() -> Result<(), anyhow::Error> {
         if let Some(path) = config.static_overrides {
             let overrides = load_static_overrides(path)?;
             for node in overrides.nodes.iter() {
-                local_overrides.insert(u32::from(node.address));
+                local_overrides.insert(u32::from(node.ip));
             }
             info!("Loaded static overrides: {:?}", overrides);
         };
