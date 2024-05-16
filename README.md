@@ -53,7 +53,7 @@ cargo build
 ## Run
 
 ```bash
-RUST_LOG=info cargo xtask run -- --iface <iface> --static_overrides <path_to_static_overrides.yaml> -p 8004 -p 8005 -p 8006
+RUST_LOG=info cargo xtask run -- --iface <iface> --static-overrides <path_to_static_overrides.yaml> -p 8004 -p 8005 -p 8006
 ```
 
 
