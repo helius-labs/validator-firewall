@@ -18,8 +18,9 @@ export PATH=/usr/lib/linux-tools/5.8.0-63-generic:$PATH
 
 ## General Structure
 
-The project is split into two main components: the eBPF program and the userspace program.  The eBPF program is linked
-into the userspace program and is loaded into the kernel. The userspace program is responsible for setting up the eBPF 
+The project is split into two main components: an eBPF program that runs in the context of the network driver and a 
+userspace program that configures it.  The raw bytes of the eBPF program are linked into the userspace program and 
+the executable is loaded into the kernel on start. The userspace program is responsible for setting up the eBPF 
 maps (shared memory between the eBPF program and the userspace program), pushing in external data, and reporting stats.
 
 By default, all non-gossip traffic is blocked on the specified ports.  An additional set of hosts can be specified in a
@@ -58,4 +59,6 @@ RUST_LOG=info cargo xtask run -- --iface <iface> --static_overrides <path_to_sta
 
 ## Production
 This should be run under a user with the CAP_NET_ADMIN capability. This is required to load the eBPF program and to set the XDP program on the interface.
+
+Some background reading on XDP: [How to Drop 10M Packets per Second](https://blog.cloudflare.com/how-to-drop-10-million-packets)
 
