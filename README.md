@@ -60,5 +60,13 @@ RUST_LOG=info cargo xtask run -- --iface <iface> --static_overrides <path_to_sta
 ## Production
 This should be run under a user with the CAP_NET_ADMIN capability. This is required to load the eBPF program and to set the XDP program on the interface.
 
-Some background reading on XDP: [How to Drop 10M Packets per Second](https://blog.cloudflare.com/how-to-drop-10-million-packets)
+## Developing on This Project
+
+In general, the eBPF component should be as lightweight and as fast as possible.  It's in the datapath, so we need to do as little  work there as we can.
+
+Some background reading on why XDP: [How to Drop 10M Packets per Second](https://blog.cloudflare.com/how-to-drop-10-million-packets)
+
+This project heavily uses [Aya](https://aya-rs.dev/book/). 
+
+
 
