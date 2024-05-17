@@ -23,16 +23,18 @@ userspace program that configures it.  The raw bytes of the eBPF program are lin
 the executable is loaded into the kernel on start. The userspace program is responsible for setting up the eBPF 
 maps (shared memory between the eBPF program and the userspace program), pushing in external data, and reporting stats.
 
-By default, all non-gossip traffic is blocked on the specified ports.  An additional set of hosts can be specified in a
-static overrides file.  This file is a YAML file that contains a list of IP addresses that should be allowed to bypass 
-the firewall.  The format is as follows:
+By default, all non-gossip traffic is blocked on protected ports.  Additional hosts can be configured to be allowed when
+not in gossip, or denied (even when in gossip).  This is configured via a static overrides file using the following format:
 
 ```yaml
-nodes:
+allow:
   - name: "host1"
-    address: 1.2.3.4
+    ip: 1.2.3.4
   - name: "host2"
-    address: 4.5.6.7
+    ip: 4.5.6.7
+deny:
+  - name: "spammer"
+    ip: 8.9.10.11
 ```
 
 ## Build eBPF
