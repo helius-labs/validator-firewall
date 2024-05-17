@@ -61,7 +61,7 @@ cargo build
 
 ```bash
 #If -p is not specified, we only act on 8009, 8010 
-RUST_LOG=info cargo xtask run --released -- --iface <iface> --static-overrides <path_to_static_overrides.yaml> -p 8004 -p 8005 -p 8006
+RUST_LOG=info cargo xtask run --release -- --iface <iface> --static-overrides <path_to_static_overrides.yaml> -p 8004 -p 8005 -p 8006
 ```
 
 
