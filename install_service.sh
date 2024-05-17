@@ -45,10 +45,10 @@ echo "Creating static_overrides.yml file..."
 sudo bash -c "cat > $STATIC_OVERRIDES_FILE" <<EOL
 allow:
   - name: example_node
-  - ip: 1.2.3.4
+    ip: 1.2.3.4
 deny:
   - name: spammer_node
-  - ip: 1.2.3.6
+    ip: 1.2.3.6
 EOL
 
 # Prompt for interface to filter on
