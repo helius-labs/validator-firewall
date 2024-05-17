@@ -9,12 +9,17 @@ Low level blocking for validator nodes. This project is a work in progress and i
 
 1. Install nightly components: `rustup toolchain install nightly --component rust-src`
 2. Install bpf-linker: `cargo install bpf-linker`
-3. If you're running on Ubuntu 20.04, there is a bug with bpftool and the default kernel installed by the distribution. To avoid running into it, you can install a newer bpftool version that does not include the bug with:
+
+### Caveats for Ubuntu 20.04
+
+There is a bug with bpftool and the default kernel installed by the distribution. To avoid running into it, you can install a newer bpftool version that does not include the bug with:
 
 ```
 sudo apt install linux-tools-5.8.0-63-generic
 export PATH=/usr/lib/linux-tools/5.8.0-63-generic:$PATH
 ```
+
+Bond interfaces are not supported.
 
 ## General Structure
 
@@ -55,7 +60,8 @@ cargo build
 ## Run
 
 ```bash
-RUST_LOG=info cargo xtask run -- --iface <iface> --static-overrides <path_to_static_overrides.yaml> -p 8004 -p 8005 -p 8006
+#If -p is not specified, we only act on 8009, 8010 
+RUST_LOG=info cargo xtask run --released -- --iface <iface> --static-overrides <path_to_static_overrides.yaml> -p 8004 -p 8005 -p 8006
 ```
 
 
