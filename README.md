@@ -68,6 +68,8 @@ RUST_LOG=info cargo xtask run --release -- --iface <iface> --static-overrides <p
 ## Production
 This should be run under a user with the CAP_NET_ADMIN capability. This is required to load the eBPF program and to set the XDP program on the interface.
 
+The `install_service.sh` script (uses sudo) can create a basic systemd unit file and overrides config.
+
 ## Developing on this Project
 
 In general, the eBPF component should be as lightweight and as fast as possible.  It's in the datapath, so we need to do as little  work there as we can.
