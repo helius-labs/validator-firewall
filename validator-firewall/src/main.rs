@@ -29,7 +29,7 @@ struct HVFConfig {
     static_overrides: Option<PathBuf>,
     #[clap(short, long, default_value = "https://api.mainnet-beta.solana.com")]
     rpc_endpoint: String,
-    #[arg(short, long, value_name = "PORT", value_parser = clap::value_parser!(u16), num_args = 0.., default_value="8009 8010")]
+    #[arg(short, long, value_name = "PORT", value_parser = clap::value_parser!(u16), num_args = 0..)]
     protected_ports: Vec<u16>,
 }
 #[allow(dead_code)] //Used in Debug
@@ -88,6 +88,13 @@ async fn main() -> Result<(), anyhow::Error> {
         Arc::new((local_allow, local_deny))
     };
 
+    let protected_ports = if config.protected_ports.is_empty() {
+        warn!("No protected ports provided, defaulting to 8009 and 8010");
+        vec![8009, 8010]
+    } else {
+        config.protected_ports.clone()
+    };
+
     // Bump the memlock rlimit. This is needed for older kernels that don't use the
     // new memcg based accounting, see https://lwn.net/Articles/837122/
     let rlim = libc::rlimit {
@@ -121,7 +128,7 @@ async fn main() -> Result<(), anyhow::Error> {
         .context("failed to attach the XDP program with default flags - try changing XdpFlags::default() to XdpFlags::SKB_MODE")?;
 
     info!("Filtering UDP ports: {:?}", config.protected_ports);
-    push_ports_to_map(&mut bpf, config.protected_ports)?;
+    push_ports_to_map(&mut bpf, protected_ports)?;
 
     let exit = Arc::new(AtomicBool::new(false));
     let gossip_exit = exit.clone();
