@@ -127,7 +127,7 @@ async fn main() -> Result<(), anyhow::Error> {
     program.attach(&config.iface, XdpFlags::default())
         .context("failed to attach the XDP program with default flags - try changing XdpFlags::default() to XdpFlags::SKB_MODE")?;
 
-    info!("Filtering UDP ports: {:?}", config.protected_ports);
+    info!("Filtering UDP ports: {:?}", protected_ports);
     push_ports_to_map(&mut bpf, protected_ports)?;
 
     let exit = Arc::new(AtomicBool::new(false));
