@@ -11,7 +11,7 @@ use aya::{
 };
 use aya_log::BpfLogger;
 use clap::Parser;
-use log::{debug, info, warn};
+use log::{debug, error, info, warn};
 use serde::Deserialize;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use std::collections::HashSet;
@@ -29,10 +29,10 @@ struct HVFConfig {
     static_overrides: Option<PathBuf>,
     #[clap(short, long, default_value = "https://api.mainnet-beta.solana.com")]
     rpc_endpoint: String,
-    #[arg(short, long, value_name = "PORT", value_parser = clap::value_parser!(u16), num_args = 1..)]
+    #[arg(short, long, value_name = "PORT", value_parser = clap::value_parser!(u16), num_args = 0.., default_value="8009 8010")]
     protected_ports: Vec<u16>,
 }
-
+#[allow(dead_code)] //Used in Debug
 #[derive(Deserialize, Debug)]
 struct NameAddressPair {
     name: String,
@@ -41,7 +41,8 @@ struct NameAddressPair {
 
 #[derive(Deserialize, Debug)]
 struct StaticOverrides {
-    nodes: Vec<NameAddressPair>,
+    allow: Vec<NameAddressPair>,
+    deny: Vec<NameAddressPair>,
 }
 
 const ALLOW_LIST_MAP: &str = "hvf_allow_list";
@@ -55,15 +56,36 @@ async fn main() -> Result<(), anyhow::Error> {
 
     env_logger::init();
     let static_overrides = {
-        let mut local_overrides = HashSet::new();
+        let mut local_allow = HashSet::new();
+        let mut local_deny = HashSet::new();
+
+        // Load static overrides if provided
         if let Some(path) = config.static_overrides {
             let overrides = load_static_overrides(path)?;
-            for node in overrides.nodes.iter() {
-                local_overrides.insert(u32::from(node.ip));
+            let denied: HashSet<Ipv4Addr> = overrides.deny.iter().map(|x| x.ip.clone()).collect();
+            let intersection: Vec<&NameAddressPair> = overrides
+                .allow
+                .iter()
+                .filter(|x| denied.contains(&x.ip))
+                .collect();
+
+            if !intersection.is_empty() {
+                error!(
+                    "Static overrides contain overlapping entries for deny and allow: {:?}",
+                    intersection
+                );
+                std::process::exit(1);
             }
+            for node in overrides.allow.iter() {
+                local_allow.insert(u32::from(node.ip));
+            }
+            for node in overrides.deny.iter() {
+                local_deny.insert(u32::from(node.ip));
+            }
+
             info!("Loaded static overrides: {:?}", overrides);
         };
-        Arc::new(local_overrides)
+        Arc::new((local_allow, local_deny))
     };
 
     // Bump the memlock rlimit. This is needed for older kernels that don't use the

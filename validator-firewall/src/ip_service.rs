@@ -11,7 +11,7 @@ use tokio::time::sleep;
 pub struct GossipWatcher {
     exit_flag: Arc<AtomicBool>,
     rpc_client: Arc<RpcClient>,
-    static_overrides: Arc<HashSet<u32>>,
+    static_overrides: Arc<(HashSet<u32>, HashSet<u32>)>,
     // allow_list: Map, //Annoying type-erased BPF Map <u32, u8>
 }
 
@@ -19,7 +19,7 @@ impl GossipWatcher {
     pub fn new(
         exit_flag: Arc<AtomicBool>,
         rpc_client: Arc<RpcClient>,
-        static_overrides: Arc<HashSet<u32>>,
+        static_overrides: Arc<(HashSet<u32>, HashSet<u32>)>,
         // allow_list: Map,
     ) -> Self {
         Self {
@@ -31,7 +31,11 @@ impl GossipWatcher {
     }
     pub async fn run(&self, allow_list: Map) {
         let mut allow_list: HashMap<_, u32, u8> = HashMap::try_from(allow_list).unwrap();
-        for ip in self.static_overrides.iter() {
+
+        let allow_overrides = &self.static_overrides.clone().0;
+        let deny_overrides = &self.static_overrides.clone().1;
+
+        for ip in allow_overrides.iter() {
             allow_list.insert(ip, 0, 0).unwrap();
         }
         let mut gossip_set = HashSet::new();
@@ -45,7 +49,9 @@ impl GossipWatcher {
                             let ip_numeric: u32 = (*sock.ip())
                                 .try_into()
                                 .expect("Received invalid ip address");
-                            gossip_set.insert(ip_numeric);
+                            if !deny_overrides.contains(&ip_numeric) {
+                                gossip_set.insert(ip_numeric);
+                            }
                         }
                         SocketAddr::V6(_) => {}
                     }
@@ -55,9 +61,7 @@ impl GossipWatcher {
                     allow_list
                         .iter()
                         .filter_map(|r| r.ok())
-                        .filter(|(x, _)| {
-                            !gossip_set.contains(x) && !self.static_overrides.contains(x)
-                        })
+                        .filter(|(x, _)| !gossip_set.contains(x) && !allow_overrides.contains(x))
                         .map(|x| x.0)
                         .collect::<Vec<u32>>()
                 };
