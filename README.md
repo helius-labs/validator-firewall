@@ -1,4 +1,4 @@
-# Helius Validator Firewall
+# Validator Firewall
 
 Low level blocking for validator nodes. This project is a work in progress and interfaces may change.
 
