@@ -45,14 +45,17 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
 }
 
 //Hide some unsafe blocks
+#[inline(always)]
 fn is_allow_listed(address: u32) -> bool {
     unsafe { ALLOW_LIST.get(&address).is_some() }
 }
 
+#[inline(always)]
 fn is_protected_port(dest_port: u16) -> bool {
     unsafe { PROTECTED_PORTS.get(&dest_port).is_some() }
 }
 
+#[inline(always)]
 fn increment_counter(address: u32, collection: &PerCpuHashMap<u32, u64>) {
     unsafe {
         if let Some(count) = collection.get_ptr_mut(&address) {
