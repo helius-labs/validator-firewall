@@ -17,6 +17,8 @@ tokio = { version = "1.25", features = ["macros", "rt", "rt-multi-thread", "net"
 solana-rpc-client = "1.18.12"
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = { version = "0.9" }
+cidr = { version = "0.2", features = ["serde"]}
+rangemap = "1.5.1"
 
 [[bin]]
 name = "validator-firewall"

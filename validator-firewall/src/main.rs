@@ -10,12 +10,12 @@ use aya::{
     Bpf,
 };
 use aya_log::BpfLogger;
+use cidr::Ipv4Cidr;
 use clap::Parser;
 use log::{debug, error, info, warn};
 use serde::Deserialize;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use std::collections::HashSet;
-use std::net::Ipv4Addr;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -36,7 +36,7 @@ struct HVFConfig {
 #[derive(Deserialize, Debug)]
 struct NameAddressPair {
     name: String,
-    ip: Ipv4Addr,
+    ip: Ipv4Cidr,
 }
 
 #[derive(Deserialize, Debug)]
@@ -62,7 +62,7 @@ async fn main() -> Result<(), anyhow::Error> {
         // Load static overrides if provided
         if let Some(path) = config.static_overrides {
             let overrides = load_static_overrides(path)?;
-            let denied: HashSet<Ipv4Addr> = overrides.deny.iter().map(|x| x.ip.clone()).collect();
+            let denied: HashSet<Ipv4Cidr> = overrides.deny.iter().map(|x| x.ip.clone()).collect();
             let intersection: Vec<&NameAddressPair> = overrides
                 .allow
                 .iter()
@@ -77,10 +77,10 @@ async fn main() -> Result<(), anyhow::Error> {
                 std::process::exit(1);
             }
             for node in overrides.allow.iter() {
-                local_allow.insert(u32::from(node.ip));
+                local_allow.insert(node.ip);
             }
             for node in overrides.deny.iter() {
-                local_deny.insert(u32::from(node.ip));
+                local_deny.insert(node.ip);
             }
 
             info!("Loaded static overrides: {:?}", overrides);
@@ -181,4 +181,17 @@ fn push_ports_to_map(bpf: &mut Bpf, ports: Vec<u16>) -> Result<(), anyhow::Error
         protected_ports.insert(&port, &0, 0)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    
+    use cidr::Ipv4Cidr;
+    use std::str::FromStr;
+
+    #[test]
+    fn test_scalar_conversion() {
+        let string_scalar = Ipv4Cidr::from_str("1.3.5.7").unwrap();
+        assert_eq!(string_scalar.network_length(), 32);
+    }
 }
