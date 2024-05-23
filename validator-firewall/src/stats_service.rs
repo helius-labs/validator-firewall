@@ -1,5 +1,5 @@
 use aya::maps::{Map, MapData, MapIter, PerCpuHashMap, PerCpuValues};
-use log::info;
+use log::{info, debug};
 use std::net::Ipv4Addr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -37,6 +37,7 @@ impl StatsService {
                     per_cpu.iter().sum(),
                 )
             })
+            .limit(100)
             .collect();
         pairs.sort_by(|a, b| b.1.cmp(&a.1));
         pairs
