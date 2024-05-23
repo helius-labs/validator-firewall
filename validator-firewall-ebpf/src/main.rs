@@ -21,10 +21,10 @@ use network_types::{
 static ALLOW_LIST: HashMap<u32, u8> = HashMap::<u32, u8>::with_max_entries(8192, 0);
 #[map(name = "hvf_all_ip_stats")]
 static ALL_TRAFFIC_STATS: PerCpuHashMap<u32, u64> =
-    PerCpuHashMap::<u32, u64>::with_max_entries(8192, 0);
+    PerCpuHashMap::<u32, u64>::with_max_entries(16384, 0);
 #[map(name = "hvf_blocked_ip_stats")]
 static BLOCKED_TRAFFIC_STATS: PerCpuHashMap<u32, u64> =
-    PerCpuHashMap::<u32, u64>::with_max_entries(8192, 0);
+    PerCpuHashMap::<u32, u64>::with_max_entries(16384, 0);
 #[map(name = "hvf_protected_ports")]
 static PROTECTED_PORTS: HashMap<u16, u8> = HashMap::<u16, u8>::with_max_entries(1024, 0);
 
