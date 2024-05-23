@@ -1,5 +1,5 @@
 use aya::maps::{Map, MapData, MapIter, PerCpuHashMap, PerCpuValues};
-use log::{info, debug};
+use log::info;
 use std::net::Ipv4Addr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -37,7 +37,6 @@ impl StatsService {
                     per_cpu.iter().sum(),
                 )
             })
-            .take(100)
             .collect();
         pairs.sort_by(|a, b| b.1.cmp(&a.1));
         pairs
@@ -58,9 +57,13 @@ impl StatsService {
         while !co_exit.load(Ordering::Relaxed) {
             // Get stats from the maps
             let mut all_sum = 0u64;
+            let mut log_limit = 100;
             for (addr, total) in Self::prepare_stats(all_traffic.iter()) {
                 all_sum += total;
-                info!("total_packets: {:?} = {:?}", addr, total);
+                if log_limit > 0 {
+                    info!("total_packets: {:?} = {:?}", addr, total);
+                    log_limit -= 1;
+                }
             }
             info!(
                 "All traffic summary: {} pkts last_interval {} pkts {} pkts/s",
@@ -72,9 +75,13 @@ impl StatsService {
             all_las_eval_time = std::time::Instant::now();
 
             let mut blocked_sum = 0u64;
+            let mut log_limit = 100;
             for (addr, total) in Self::prepare_stats(blocked_traffic.iter()) {
                 blocked_sum += total;
-                info!("dropped_packets: {:?} = {:?}", addr, total);
+                if log_limit > 0 {
+                    info!("dropped_packets: {:?} = {:?}", addr, total);
+                    log_limit -= 1;
+                }
             }
             info!(
                 "Blocked traffic summary: {} pkts last_interval {} pkts {} pkts/s",

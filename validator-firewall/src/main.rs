@@ -185,7 +185,7 @@ fn push_ports_to_map(bpf: &mut Bpf, ports: Vec<u16>) -> Result<(), anyhow::Error
 
 #[cfg(test)]
 mod tests {
-    
+
     use cidr::Ipv4Cidr;
     use std::str::FromStr;
 
