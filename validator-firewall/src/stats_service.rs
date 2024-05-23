@@ -37,7 +37,7 @@ impl StatsService {
                     per_cpu.iter().sum(),
                 )
             })
-            .limit(100)
+            .take(100)
             .collect();
         pairs.sort_by(|a, b| b.1.cmp(&a.1));
         pairs
