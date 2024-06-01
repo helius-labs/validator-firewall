@@ -1,0 +1,49 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+
+      - name: Install bpf-linker
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: bpf-linker
+
+      - uses: actions/cache@v2
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - uses: actions-rs/cargo@v1
+        with:
+          command: xtask
+          args: build-ebpf --release
+
+      - uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --release
+
+      - uses: ncipollo/release-action@v1
+        with:
+          artifacts: target/release/validator-firewall
+          omitBody: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+
