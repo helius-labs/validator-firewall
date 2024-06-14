@@ -1,7 +1,10 @@
 mod ip_service;
 mod stats_service;
 
-use crate::ip_service::GossipWatcher;
+mod leader_tracker;
+
+use crate::ip_service::{AllowListService, AllowListStateUpdater, GossipAllowListClient};
+use crate::leader_tracker::{CommandControlService, RPCLeaderTracker};
 use anyhow::Context;
 use aya::{
     include_bytes_aligned,
@@ -31,6 +34,8 @@ struct HVFConfig {
     rpc_endpoint: String,
     #[arg(short, long, value_name = "PORT", value_parser = clap::value_parser!(u16), num_args = 0..)]
     protected_ports: Vec<u16>,
+    #[clap(short, long)]
+    leader_id: Option<String>,
 }
 #[allow(dead_code)] //Used in Debug
 #[derive(Deserialize, Debug)]
@@ -49,6 +54,7 @@ const ALLOW_LIST_MAP: &str = "hvf_allow_list";
 const PROTECTED_PORTS_MAP: &str = "hvf_protected_ports";
 const ALL_TRAFFIC_MAP: &str = "hvf_all_ip_stats";
 const BLOCKED_TRAFFIC_MAP: &str = "hvf_blocked_ip_stats";
+const CNC_ARRAY: &str = "hvf_cnc";
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
@@ -133,11 +139,31 @@ async fn main() -> Result<(), anyhow::Error> {
     let exit = Arc::new(AtomicBool::new(false));
     let gossip_exit = exit.clone();
 
-    let gossip_watcher = GossipWatcher::new(
+    let gossip_watcher = AllowListStateUpdater::new(
         gossip_exit,
-        Arc::new(RpcClient::new(config.rpc_endpoint.clone())),
+        Arc::new(AllowListService::new(GossipAllowListClient::new(
+            RpcClient::new(config.rpc_endpoint.clone()),
+        ))),
         static_overrides.clone(),
     );
+
+    //Start the leader tracker
+    let tracker = Arc::new(RPCLeaderTracker::new(
+        exit.clone(),
+        RpcClient::new(config.rpc_endpoint.clone()),
+        10,
+        config.leader_id,
+    ));
+    let bg_tracker = tracker.clone();
+    let tracker_handle = tokio::spawn(async move {
+        bg_tracker.clone().run().await;
+    });
+
+    let mut tracker_service =
+        CommandControlService::new(exit.clone(), tracker, bpf.take_map(CNC_ARRAY).unwrap());
+    let tracker_service_handle = tokio::spawn(async move {
+        tracker_service.run().await;
+    });
 
     //Update the allow_list in the background
     let map = bpf.take_map(ALLOW_LIST_MAP).unwrap();
@@ -160,8 +186,13 @@ async fn main() -> Result<(), anyhow::Error> {
     info!("Waiting for Ctrl-C...");
     signal::ctrl_c().await?;
     exit.store(true, std::sync::atomic::Ordering::SeqCst);
-    gossip_handle.await?;
-    stats_handle.await?;
+
+    let (_, _, _, _) = tokio::join!(
+        gossip_handle,
+        stats_handle,
+        tracker_handle,
+        tracker_service_handle
+    );
     info!("Exiting...");
 
     Ok(())
