@@ -1,6 +1,6 @@
 use aya::maps::{HashMap, Map};
 use cidr::Ipv4Cidr;
-use log::debug;
+use log::{debug, error};
 use rangemap::RangeInclusiveSet;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use std::collections::HashSet;
@@ -11,9 +11,60 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
 
-pub struct GossipWatcher {
+pub struct GossipAllowListClient {
+    rpc_client: RpcClient,
+}
+
+impl GossipAllowListClient {
+    pub fn new(rpc_client: RpcClient) -> Self {
+        Self { rpc_client }
+    }
+}
+impl AllowListClient for GossipAllowListClient {
+    async fn get_allow_list(&self) -> Result<Vec<Ipv4Cidr>, ()> {
+        let mut gossip_set = HashSet::new();
+        if let Ok(nodes) = self.rpc_client.get_cluster_nodes().await {
+            for node in nodes.iter().filter(|n| n.gossip.is_some()) {
+                match node.gossip.as_ref().unwrap() {
+                    SocketAddr::V4(sock) => {
+                        let cidr = Ipv4Cidr::new(*sock.ip(), 32).unwrap();
+                        gossip_set.insert(cidr);
+                    }
+                    SocketAddr::V6(_) => {}
+                }
+            }
+
+            if gossip_set.is_empty() {
+                return Err(());
+            }
+            Ok(gossip_set.into_iter().collect())
+        } else {
+            Err(())
+        }
+    }
+}
+
+pub trait AllowListClient {
+    async fn get_allow_list(&self) -> Result<Vec<Ipv4Cidr>, ()>;
+}
+
+pub struct AllowListService<T: AllowListClient> {
+    allow_list_client: T,
+}
+
+impl<T: AllowListClient> AllowListService<T> {
+    pub fn new(allow_list_client: T) -> Self {
+        Self { allow_list_client }
+    }
+
+    pub async fn get_allow_list(&self) -> Result<Vec<Ipv4Cidr>, ()> {
+        self.allow_list_client.get_allow_list().await
+    }
+}
+
+pub struct AllowListStateUpdater<T: AllowListClient> {
     exit_flag: Arc<AtomicBool>,
-    rpc_client: Arc<RpcClient>,
+    allow_service: Arc<AllowListService<T>>,
     allow_ranges: RangeInclusiveSet<u32>,
     deny_ranges: RangeInclusiveSet<u32>,
 }
@@ -24,15 +75,15 @@ pub fn to_range(ip: Ipv4Cidr) -> RangeInclusive<u32> {
     start_addr..=end_addr
 }
 
-impl GossipWatcher {
+impl<T: AllowListClient> AllowListStateUpdater<T> {
     pub fn new(
         exit_flag: Arc<AtomicBool>,
-        rpc_client: Arc<RpcClient>,
+        allow_service: Arc<AllowListService<T>>,
         static_overrides: Arc<(HashSet<Ipv4Cidr>, HashSet<Ipv4Cidr>)>,
     ) -> Self {
         Self {
             exit_flag,
-            rpc_client,
+            allow_service,
             allow_ranges: {
                 RangeInclusiveSet::from_iter(
                     static_overrides.clone().0.iter().map(|ip| to_range(*ip)),
@@ -54,22 +105,15 @@ impl GossipWatcher {
 
     pub async fn run(&self, allow_list: Map) {
         let mut allow_list: HashMap<_, u32, u8> = HashMap::try_from(allow_list).unwrap();
-        let mut gossip_set = HashSet::new();
+        let mut dynamic_allow_set = HashSet::new();
 
         while !self.exit_flag.load(Ordering::Relaxed) {
-            if let Ok(nodes) = self.rpc_client.get_cluster_nodes().await {
-                gossip_set.clear();
-                for node in nodes.iter().filter(|n| n.gossip.is_some()) {
-                    match node.gossip.as_ref().unwrap() {
-                        SocketAddr::V4(sock) => {
-                            let ip_numeric: u32 = (*sock.ip())
-                                .try_into()
-                                .expect("Received invalid ip address");
-                            if !self.is_denied(&ip_numeric) {
-                                gossip_set.insert(ip_numeric);
-                            }
-                        }
-                        SocketAddr::V6(_) => {}
+            if let Ok(nodes) = self.allow_service.get_allow_list().await {
+                dynamic_allow_set.clear();
+                for ip4addr in nodes.iter().flat_map(|cidr| cidr.into_iter().addresses()) {
+                    let ip_numeric: u32 = ip4addr.try_into().expect("Received invalid ip address");
+                    if !self.is_denied(&ip_numeric) {
+                        dynamic_allow_set.insert(ip_numeric);
                     }
                 }
 
@@ -77,7 +121,7 @@ impl GossipWatcher {
                     allow_list
                         .iter()
                         .filter_map(|r| r.ok())
-                        .filter(|(x, _)| !gossip_set.contains(x) && !self.is_allowed(x))
+                        .filter(|(x, _)| !dynamic_allow_set.contains(x) && !self.is_allowed(x))
                         .map(|x| x.0)
                         .collect::<Vec<u32>>()
                 };
@@ -88,12 +132,14 @@ impl GossipWatcher {
                 }
 
                 {
-                    for ip in gossip_set.iter() {
+                    for ip in dynamic_allow_set.iter() {
                         if !allow_list.get(ip, 0).is_ok() {
                             allow_list.insert(ip, 0, 0).unwrap();
                         }
                     }
                 }
+            } else {
+                error!("Error fetching allow list from RPC");
             }
 
             sleep(Duration::from_secs(10)).await;

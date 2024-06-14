@@ -14,12 +14,19 @@ env_logger = "0.10"
 libc = "0.2"
 log = "0.4"
 tokio = { version = "1.25", features = ["macros", "rt", "rt-multi-thread", "net", "signal"] }
-solana-rpc-client = "1.18.12"
+solana-rpc-client = "1.18.15"
+solana-sdk = "1.18.15"
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = { version = "0.9" }
 cidr = { version = "0.2", features = ["serde"]}
 rangemap = "1.5.1"
+axum = "0.7.5"
+async-trait = "0.1.80"
 
 [[bin]]
 name = "validator-firewall"
 path = "src/main.rs"
+
+#[[bin]]
+#name = "standalone-ip-service"
+#path = "src/ip_service_main.rs"
