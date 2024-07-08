@@ -3,38 +3,48 @@ use log::info;
 use std::net::Ipv4Addr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use validator_firewall_common::StatType::{All, Blocked};
+use validator_firewall_common::{ConnectionStats, StatType};
 
 pub struct StatsService {
     exit: Arc<AtomicBool>,
     interval: u64,
-    all_traffic_stats: Map,
-    blocked_traffic_stats: Map,
+    traffic_stats: Map,
 }
 
 impl StatsService {
-    pub fn new(
-        exit: Arc<AtomicBool>,
-        interval: u64,
-        all_traffic_stats: Map,
-        blocked_traffic_stats: Map,
-    ) -> Self {
+    pub fn new(exit: Arc<AtomicBool>, interval: u64, traffic_stats: Map) -> Self {
         Self {
             exit,
             interval,
-            all_traffic_stats,
-            blocked_traffic_stats,
+            traffic_stats,
         }
     }
 
     pub fn prepare_stats(
-        map: MapIter<u32, PerCpuValues<u64>, PerCpuHashMap<&MapData, u32, u64>>,
+        map: MapIter<
+            u32,
+            PerCpuValues<ConnectionStats>,
+            PerCpuHashMap<&MapData, u32, ConnectionStats>,
+        >,
+        stat_type: StatType,
     ) -> Vec<(Ipv4Addr, u64)> {
         let mut pairs: Vec<(Ipv4Addr, u64)> = map
             .filter_map(|res| res.ok())
             .map(|(addr, per_cpu)| {
+                let parsed_addr = std::net::Ipv4Addr::from(u32::from_ne_bytes(addr.to_ne_bytes()));
+
                 (
-                    std::net::Ipv4Addr::from(u32::from_ne_bytes(addr.to_ne_bytes())),
-                    per_cpu.iter().sum(),
+                    parsed_addr,
+                    per_cpu
+                        .iter()
+                        .map(|x| match stat_type {
+                            StatType::All => x.pkt_count,
+                            StatType::Blocked => x.blocked_pkt_count,
+                            StatType::FarFromLeader => x.far_from_leader_pkt_count,
+                            StatType::ZeroRtt => x.zero_rtt_pkt_count,
+                        })
+                        .sum::<u64>(),
                 )
             })
             .collect();
@@ -44,10 +54,8 @@ impl StatsService {
 
     pub async fn run(&self) {
         let co_exit = self.exit.clone();
-        let all_traffic: PerCpuHashMap<_, u32, u64> =
-            PerCpuHashMap::try_from(&self.all_traffic_stats).unwrap();
-        let blocked_traffic: PerCpuHashMap<_, u32, u64> =
-            PerCpuHashMap::try_from(&self.blocked_traffic_stats).unwrap();
+        let traffic_stats: PerCpuHashMap<_, u32, ConnectionStats> =
+            PerCpuHashMap::try_from(&self.traffic_stats).unwrap();
         let report_interval = tokio::time::Duration::from_secs(self.interval);
         let mut blocked_last_sum = 0u64;
         let mut blocked_las_eval_time = std::time::Instant::now();
@@ -58,7 +66,7 @@ impl StatsService {
             // Get stats from the maps
             let mut all_sum = 0u64;
             let mut log_limit = 100;
-            for (addr, total) in Self::prepare_stats(all_traffic.iter()) {
+            for (addr, total) in Self::prepare_stats(traffic_stats.iter(), All) {
                 all_sum += total;
                 if log_limit > 0 {
                     info!("total_packets: {:?} = {:?}", addr, total);
@@ -76,7 +84,7 @@ impl StatsService {
 
             let mut blocked_sum = 0u64;
             let mut log_limit = 100;
-            for (addr, total) in Self::prepare_stats(blocked_traffic.iter()) {
+            for (addr, total) in Self::prepare_stats(traffic_stats.iter(), Blocked) {
                 blocked_sum += total;
                 if log_limit > 0 {
                     info!("dropped_packets: {:?} = {:?}", addr, total);
