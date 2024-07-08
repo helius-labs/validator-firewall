@@ -1,9 +1,14 @@
 mod ip_service;
 mod stats_service;
 
+mod config;
 mod leader_tracker;
 
-use crate::ip_service::{AllowListService, AllowListStateUpdater, GossipAllowListClient};
+use crate::config::{load_static_overrides, NameAddressPair};
+use crate::ip_service::{
+    AllowListClient, AllowListService, AllowListStateUpdater, ExternalAllowListClient,
+    GossipAllowListClient,
+};
 use crate::leader_tracker::{CommandControlService, RPCLeaderTracker};
 use anyhow::Context;
 use aya::{
@@ -36,31 +41,21 @@ struct HVFConfig {
     protected_ports: Vec<u16>,
     #[clap(short, long)]
     leader_id: Option<String>,
-}
-#[allow(dead_code)] //Used in Debug
-#[derive(Deserialize, Debug)]
-struct NameAddressPair {
-    name: String,
-    ip: Ipv4Cidr,
-}
-
-#[derive(Deserialize, Debug)]
-struct StaticOverrides {
-    allow: Vec<NameAddressPair>,
-    deny: Vec<NameAddressPair>,
+    #[clap(short, long)]
+    external_ip_service_url: Option<String>,
 }
 
 const ALLOW_LIST_MAP: &str = "hvf_allow_list";
 const PROTECTED_PORTS_MAP: &str = "hvf_protected_ports";
-const ALL_TRAFFIC_MAP: &str = "hvf_all_ip_stats";
-const BLOCKED_TRAFFIC_MAP: &str = "hvf_blocked_ip_stats";
+const CONNECTION_STATS: &str = "hvf_stats";
 const CNC_ARRAY: &str = "hvf_cnc";
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
     let config = HVFConfig::parse();
 
-    env_logger::init();
+    tracing_subscriber::fmt().json().init();
+
     let static_overrides = {
         let mut local_allow = HashSet::new();
         let mut local_deny = HashSet::new();
@@ -139,13 +134,37 @@ async fn main() -> Result<(), anyhow::Error> {
     let exit = Arc::new(AtomicBool::new(false));
     let gossip_exit = exit.clone();
 
-    let gossip_watcher = AllowListStateUpdater::new(
-        gossip_exit,
-        Arc::new(AllowListService::new(GossipAllowListClient::new(
-            RpcClient::new(config.rpc_endpoint.clone()),
-        ))),
-        static_overrides.clone(),
-    );
+    let ip_svc_handle = if let Some(url) = config.external_ip_service_url {
+        // Use external IP service
+        let ip_service = ExternalAllowListClient::new(url);
+        let state_updater = AllowListStateUpdater::new(
+            gossip_exit,
+            Arc::new(AllowListService::new(ip_service)),
+            static_overrides.clone(),
+        );
+
+        let map = bpf.take_map(ALLOW_LIST_MAP).unwrap();
+        let state_updater_handle = tokio::spawn(async move {
+            state_updater.run(map).await;
+        });
+
+        state_updater_handle
+    } else {
+        // Poll gossip directly
+        let s_updater = AllowListStateUpdater::new(
+            gossip_exit,
+            Arc::new(AllowListService::new(GossipAllowListClient::new(
+                RpcClient::new(config.rpc_endpoint.clone()),
+            ))),
+            static_overrides.clone(),
+        );
+
+        let map = bpf.take_map(ALLOW_LIST_MAP).unwrap();
+        let gossip_handle = tokio::spawn(async move {
+            s_updater.run(map).await;
+        });
+        gossip_handle
+    };
 
     //Start the leader tracker
     let tracker = Arc::new(RPCLeaderTracker::new(
@@ -165,20 +184,10 @@ async fn main() -> Result<(), anyhow::Error> {
         tracker_service.run().await;
     });
 
-    //Update the allow_list in the background
-    let map = bpf.take_map(ALLOW_LIST_MAP).unwrap();
-    let gossip_handle = tokio::spawn(async move {
-        gossip_watcher.run(map).await;
-    });
-
     //Start the stats service
     let stats_exit = exit.clone();
-    let stats_service = stats_service::StatsService::new(
-        stats_exit,
-        10,
-        bpf.take_map(ALL_TRAFFIC_MAP).unwrap(),
-        bpf.take_map(BLOCKED_TRAFFIC_MAP).unwrap(),
-    );
+    let stats_service =
+        stats_service::StatsService::new(stats_exit, 10, bpf.take_map(CONNECTION_STATS).unwrap());
     let stats_handle = tokio::spawn(async move {
         stats_service.run().await;
     });
@@ -188,7 +197,7 @@ async fn main() -> Result<(), anyhow::Error> {
     exit.store(true, std::sync::atomic::Ordering::SeqCst);
 
     let (_, _, _, _) = tokio::join!(
-        gossip_handle,
+        ip_svc_handle,
         stats_handle,
         tracker_handle,
         tracker_service_handle
@@ -196,13 +205,6 @@ async fn main() -> Result<(), anyhow::Error> {
     info!("Exiting...");
 
     Ok(())
-}
-
-fn load_static_overrides(path: PathBuf) -> Result<StaticOverrides, anyhow::Error> {
-    let file = std::fs::File::open(path)?;
-    let reader = std::io::BufReader::new(file);
-    let overrides = serde_yaml::from_reader(reader)?;
-    Ok(overrides)
 }
 
 fn push_ports_to_map(bpf: &mut Bpf, ports: Vec<u16>) -> Result<(), anyhow::Error> {

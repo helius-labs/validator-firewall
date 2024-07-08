@@ -1,6 +1,6 @@
 use aya::maps::{HashMap, Map};
 use cidr::Ipv4Cidr;
-use log::{debug, error};
+use log::{debug, error, info};
 use rangemap::RangeInclusiveSet;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use std::collections::HashSet;
@@ -10,6 +10,38 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
+
+pub struct ExternalAllowListClient {
+    url: String,
+}
+
+impl ExternalAllowListClient {
+    pub fn new(url: String) -> Self {
+        Self { url }
+    }
+}
+
+impl AllowListClient for ExternalAllowListClient {
+    async fn get_allow_list(&self) -> Result<Vec<Ipv4Cidr>, ()> {
+        let client = reqwest::Client::new();
+        match client.get(&self.url).send().await {
+            Ok(resp) => {
+                if resp.status().is_success() {
+                    let allow_list: Vec<Ipv4Cidr> = resp.json().await.unwrap();
+                    info!(
+                        "Retrieved {} IPs from external ip service",
+                        allow_list.len()
+                    );
+                    Ok(allow_list)
+                } else {
+                    error!("Failed to decode allow list from external ip service.");
+                    Err(())
+                }
+            }
+            Err(_) => Err(()),
+        }
+    }
+}
 
 pub struct GossipAllowListClient {
     rpc_client: RpcClient,

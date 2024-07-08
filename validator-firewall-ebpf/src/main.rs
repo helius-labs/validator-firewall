@@ -9,7 +9,7 @@ use aya_ebpf::{
 };
 use aya_log_ebpf::{debug, error, warn, info, trace};
 
-use validator_firewall_common::RuntimeControls;
+use validator_firewall_common::{RuntimeControls,ConnectionStats,StatType};
 
 use core::mem;
 use network_types::{
@@ -18,17 +18,15 @@ use network_types::{
     udp::UdpHdr,
 };
 
+
 //These are our data structures that we use to communicate with userspace
 #[map(name = "hvf_allow_list")]
 static LEADER_SLOT_ALLOW_LIST: HashMap<u32, u8> = HashMap::<u32, u8>::with_max_entries(8192, 0);
 #[map(name = "hvf_always_allow")]
 static FULL_SCHEDULE_ALLOW_LIST: HashMap<u32, u8> = HashMap::<u32, u8>::with_max_entries(8192, 0);
-#[map(name = "hvf_all_ip_stats")]
-static ALL_TRAFFIC_STATS: PerCpuHashMap<u32, u64> =
-    PerCpuHashMap::<u32, u64>::with_max_entries(16384, 0);
-#[map(name = "hvf_blocked_ip_stats")]
-static BLOCKED_TRAFFIC_STATS: PerCpuHashMap<u32, u64> =
-    PerCpuHashMap::<u32, u64>::with_max_entries(16384, 0);
+#[map(name = "hvf_stats")]
+static STATS: PerCpuHashMap<u32, ConnectionStats> = PerCpuHashMap::<u32, ConnectionStats>::with_max_entries(16384, 0);
+
 #[map(name = "hvf_protected_ports")]
 static PROTECTED_PORTS: HashMap<u16, u8> = HashMap::<u16, u8>::with_max_entries(1024, 0);
 
@@ -80,12 +78,31 @@ fn is_protected_port(dest_port: u16) -> bool {
 }
 
 #[inline(always)]
-fn increment_counter(address: u32, collection: &PerCpuHashMap<u32, u64>) {
+fn increment_counter(ctx: &XdpContext, address: u32, stat_type: StatType) {
     unsafe {
-        if let Some(count) = collection.get_ptr_mut(&address) {
-            *count += 1;
-        } else {
-            let _ = collection.insert(&address, &1, 0);
+        if let None = STATS.get_ptr(&address) {
+            let _ = STATS.insert(&address, &ConnectionStats::default(), 0);
+        }
+        match STATS.get_ptr_mut(&address) {
+            Some(stats) => {
+                match stat_type {
+                    StatType::All => {
+                        (*stats).pkt_count  += 1;
+                    },
+                    StatType::Blocked => {
+                        (*stats).blocked_pkt_count += 1;
+                    },
+                    StatType::FarFromLeader => {
+                        (*stats).far_from_leader_pkt_count += 1;
+                    },
+                    StatType::ZeroRtt => {
+                        (*stats).zero_rtt_pkt_count += 1;
+                    }
+                }
+            },
+            None => {
+                error!(ctx, "No entry for {} in stats map!", address);
+            }
         }
     }
 }
@@ -120,7 +137,13 @@ fn try_process_packet(ctx: &XdpContext, close_to_leader: bool) -> Result<u32, ()
         }
 
         //Traffic above here is other OS traffic, not counted in our stats
-        increment_counter(source_addr, &ALL_TRAFFIC_STATS);
+        increment_counter(ctx, source_addr, StatType::All);
+        if !close_to_leader {
+            increment_counter(ctx, source_addr, StatType::FarFromLeader);
+        }
+        if is_quic_zero_rtt(ctx, source_addr) {
+            increment_counter(ctx, source_addr, StatType::ZeroRtt);
+        }
         let action = if is_allow_listed(source_addr, close_to_leader) {
             debug!(
                 ctx,
@@ -136,7 +159,7 @@ fn try_process_packet(ctx: &XdpContext, close_to_leader: bool) -> Result<u32, ()
                 source_addr,
                 dest_port
             );
-            increment_counter(source_addr, &BLOCKED_TRAFFIC_STATS);
+            increment_counter(ctx, source_addr, StatType::Blocked);
             xdp_action::XDP_DROP
         };
 
@@ -144,4 +167,10 @@ fn try_process_packet(ctx: &XdpContext, close_to_leader: bool) -> Result<u32, ()
     } else {
         Ok(xdp_action::XDP_PASS)
     };
+}
+
+//Placeholder
+#[inline(always)]
+fn is_quic_zero_rtt(ctx: &XdpContext, source_addr: u32) -> bool {
+    false
 }
