@@ -11,6 +11,11 @@ if ! command_exists cargo; then
     exit 1
 fi
 
+//install rust nightly and bpf linker
+echo "Installing Rust nightly and BPF linker..."
+rustup toolchain install nightly --component rust-src
+cargo install bpf-linker
+
 # Build the eBPF binary
 echo "Running 'cargo xtask build-ebpf --release'..."
 if ! cargo xtask build-ebpf --release; then

@@ -1,4 +1,4 @@
-# Validator Firewall
+ # Validator Firewall
 
 Low level blocking for validator nodes. This project is a work in progress and interfaces may change.
 
@@ -63,7 +63,11 @@ cargo build
 #If -p is not specified, we only act on 8009, 8010 
 RUST_LOG=info cargo xtask run --release -- --iface <iface> --static-overrides <path_to_static_overrides.yaml> -p 8004 -p 8005 -p 8006
 ```
+## Leader Schedule Aware Blocking
 
+By default, the firewall will attempt to determine the identity of the validator by looking at "getIdentity" from the given
+RPC endpoint (default: http://localhost:8099).  If an external RPC endpoint is specified, the identity of the validator
+being protected *MUST* be provided, or the firewall will not be able to determine if the validator is the leader or not.
 
 ## Production
 This should be run under a user with the CAP_NET_ADMIN capability. This is required to load the eBPF program and to set the XDP program on the interface.
