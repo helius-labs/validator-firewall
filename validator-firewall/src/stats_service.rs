@@ -1,8 +1,8 @@
 use aya::maps::{Map, MapData, MapIter, PerCpuHashMap, PerCpuValues};
-use log::info;
 use std::net::Ipv4Addr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use tracing::info;
 use validator_firewall_common::StatType::{All, Blocked};
 use validator_firewall_common::{ConnectionStats, StatType};
 
@@ -73,11 +73,19 @@ impl StatsService {
                     log_limit -= 1;
                 }
             }
+
+            let rate = (all_sum - all_last_sum) / all_las_eval_time.elapsed().as_secs().max(1);
+            let delta = all_sum - all_last_sum;
+
             info!(
+                traffic_type = "All",
+                rate = rate,
+                delta = delta,
+                total = all_sum,
                 "All traffic summary: {} pkts last_interval {} pkts {} pkts/s",
                 all_sum,
-                all_sum - all_last_sum,
-                (all_sum - all_last_sum) / all_las_eval_time.elapsed().as_secs().max(1)
+                delta,
+                rate
             );
             all_last_sum = all_sum;
             all_las_eval_time = std::time::Instant::now();
@@ -91,11 +99,19 @@ impl StatsService {
                     log_limit -= 1;
                 }
             }
+
+            let rate =
+                (blocked_sum - blocked_last_sum) / blocked_las_eval_time.elapsed().as_secs().max(1);
+            let delta = blocked_sum - blocked_last_sum;
             info!(
+                traffic_type = "Blocked",
+                rate = rate,
+                delta = delta,
+                total = blocked_sum,
                 "Blocked traffic summary: {} pkts last_interval {} pkts {} pkts/s",
                 blocked_sum,
-                blocked_sum - blocked_last_sum,
-                (blocked_sum - blocked_last_sum) / blocked_las_eval_time.elapsed().as_secs().max(1)
+                delta,
+                rate
             );
             blocked_last_sum = blocked_sum;
             blocked_las_eval_time = std::time::Instant::now();

@@ -8,7 +8,7 @@ publish = false
 anyhow = "1"
 async-trait = "0.1.80"
 axum = "0.7.5"
-axum-auth = "0.7"
+tower-http = { version = "0.5.2", features = ["validate-request", "auth"] }
 aya = "0.12"
 aya-log = "0.2"
 cadence = "1.4.0"
