@@ -35,7 +35,7 @@ struct HVFConfig {
     iface: String,
     #[clap(short, long)]
     static_overrides: Option<PathBuf>,
-    #[clap(short, long, default_value = "https://api.mainnet-beta.solana.com")]
+    #[clap(short, long, default_value = "http://localhost:8899")]
     rpc_endpoint: String,
     #[arg(short, long, value_name = "PORT", value_parser = clap::value_parser!(u16), num_args = 0..)]
     protected_ports: Vec<u16>,
@@ -135,7 +135,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let gossip_exit = exit.clone();
 
     let ip_svc_handle = if let Some(url) = config.external_ip_service_url {
-        // Use external IP service
+        info!("Using external IP service: {}", url);
         let ip_service = ExternalAllowListClient::new(url);
         let state_updater = AllowListStateUpdater::new(
             gossip_exit,
@@ -150,7 +150,7 @@ async fn main() -> Result<(), anyhow::Error> {
 
         state_updater_handle
     } else {
-        // Poll gossip directly
+        info!("Sourcing allowlist from gossip");
         let s_updater = AllowListStateUpdater::new(
             gossip_exit,
             Arc::new(AllowListService::new(GossipAllowListClient::new(
