@@ -27,6 +27,10 @@ struct IpServiceConfig {
     rpc_endpoint: String,
     #[clap(short, long)]
     static_overrides: Option<PathBuf>,
+    #[clap(short, long)]
+    bearer_token: Option<String>,
+    #[clap(short, long, default_value = "11525")]
+    port: u16,
 }
 
 #[tokio::main]
@@ -102,10 +106,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         app_state.add_blocked_node(node.clone()).await;
     }
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:11525")
+    info!("Starting IP service on port {}", config.port.clone());
+    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", config.port))
         .await
         .unwrap();
-    let app = create_router(app_state.clone());
+    let app = create_router(app_state.clone(), config.bearer_token);
 
     Ok(axum::serve(listener, app.into_make_service())
         .await

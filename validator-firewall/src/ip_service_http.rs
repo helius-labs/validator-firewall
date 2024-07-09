@@ -7,7 +7,8 @@ use cidr::Ipv4Cidr;
 use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::debug;
+use tower_http::auth::AddAuthorizationLayer;
+use tracing::{debug, info, warn};
 
 pub struct IPState {
     pub gossip_nodes: Arc<RwLock<HashSet<Ipv4Cidr>>>,
@@ -54,9 +55,16 @@ impl IPState {
     }
 }
 
-pub fn create_router(state: Arc<IPState>) -> Router {
-    async fn get_nodes(state: State<Arc<IPState>>) -> impl IntoResponse {
+pub fn create_router(state: Arc<IPState>, token: Option<String>) -> Router {
+    async fn get_allowed_nodes(state: State<Arc<IPState>>) -> impl IntoResponse {
         let nodes = state.get_combined_nodes().await;
+        let nodes: Vec<String> = nodes.iter().map(|node| node.to_string()).collect();
+        let body = serde_json::to_string(&nodes).unwrap();
+        (StatusCode::OK, body)
+    }
+
+    async fn get_http_nodes(state: State<Arc<IPState>>) -> impl IntoResponse {
+        let nodes = state.http_nodes.read().await;
         let nodes: Vec<String> = nodes.iter().map(|node| node.to_string()).collect();
         let body = serde_json::to_string(&nodes).unwrap();
         (StatusCode::OK, body)
@@ -69,6 +77,13 @@ pub fn create_router(state: Arc<IPState>) -> Router {
         debug!("add_http_node: {:?}", payload);
         state.add_http_node(payload).await;
         (StatusCode::CREATED, payload.to_string())
+    }
+
+    async fn get_blocked_nodes(state: State<Arc<IPState>>) -> impl IntoResponse {
+        let nodes = state.blocked_nodes.read().await;
+        let nodes: Vec<String> = nodes.iter().map(|node| node.to_string()).collect();
+        let body = serde_json::to_string(&nodes).unwrap();
+        (StatusCode::OK, body)
     }
 
     async fn add_blocked_node(
@@ -99,14 +114,43 @@ pub fn create_router(state: Arc<IPState>) -> Router {
     }
 
     let app = Router::new()
-        .route("/", get(get_nodes))
-        .route("/nodes", get(get_nodes))
-        .route("/node", post(add_http_node).delete(remove_http_node))
-        .route(
-            "/blocked",
-            post(add_blocked_node).delete(remove_blocked_node),
-        )
-        .with_state(state);
-
-    app
+        .route("/", get(get_allowed_nodes))
+        .route("/nodes", get(get_allowed_nodes))
+        .with_state(state.clone());
+    return if let Some(token) = token {
+        info!("Adding authentication layer with token: {}", token);
+        Router::new()
+            .route(
+                "/nodes/allowed",
+                post(add_http_node)
+                    .delete(remove_http_node)
+                    .get(get_http_nodes),
+            )
+            .route(
+                "/nodes/blocked",
+                post(add_blocked_node)
+                    .delete(remove_blocked_node)
+                    .get(get_blocked_nodes),
+            )
+            .route_layer(AddAuthorizationLayer::bearer(&token))
+            .with_state(state.clone())
+            .merge(app)
+    } else {
+        warn!("No authentication configured for write layer.");
+        Router::new()
+            .route(
+                "/nodes/allowed",
+                post(add_http_node)
+                    .delete(remove_http_node)
+                    .get(get_http_nodes),
+            )
+            .route(
+                "/nodes/blocked",
+                post(add_blocked_node)
+                    .delete(remove_blocked_node)
+                    .get(get_blocked_nodes),
+            )
+            .with_state(state.clone())
+            .merge(app)
+    };
 }
