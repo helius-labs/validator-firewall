@@ -121,13 +121,13 @@ pub fn create_router(state: Arc<IPState>, token: Option<String>) -> Router {
         info!("Adding authentication layer with token: {}", token);
         Router::new()
             .route(
-                "/nodes/allowed",
+                "/allowed",
                 post(add_http_node)
                     .delete(remove_http_node)
                     .get(get_http_nodes),
             )
             .route(
-                "/nodes/blocked",
+                "/blocked",
                 post(add_blocked_node)
                     .delete(remove_blocked_node)
                     .get(get_blocked_nodes),
@@ -139,13 +139,13 @@ pub fn create_router(state: Arc<IPState>, token: Option<String>) -> Router {
         warn!("No authentication configured for write layer.");
         Router::new()
             .route(
-                "/nodes/allowed",
+                "/allowed",
                 post(add_http_node)
                     .delete(remove_http_node)
                     .get(get_http_nodes),
             )
             .route(
-                "/nodes/blocked",
+                "/blocked",
                 post(add_blocked_node)
                     .delete(remove_blocked_node)
                     .get(get_blocked_nodes),
