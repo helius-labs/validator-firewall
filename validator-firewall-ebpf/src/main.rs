@@ -20,8 +20,8 @@ use network_types::{
 
 
 //These are our data structures that we use to communicate with userspace
-#[map(name = "hvf_allow_list")]
-static LEADER_SLOT_ALLOW_LIST: HashMap<u32, u8> = HashMap::<u32, u8>::with_max_entries(8192, 0);
+#[map(name = "hvf_deny_list")]
+static LEADER_SLOT_DENY_LIST: HashMap<u32, u8> = HashMap::<u32, u8>::with_max_entries(8192, 0);
 #[map(name = "hvf_always_allow")]
 static FULL_SCHEDULE_ALLOW_LIST: HashMap<u32, u8> = HashMap::<u32, u8>::with_max_entries(8192, 0);
 #[map(name = "hvf_stats")]
@@ -63,9 +63,9 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
 
 //Hide some unsafe blocks
 #[inline(always)]
-fn is_allow_listed(address: u32, close_to_leader: bool) -> bool {
+fn is_allowed(address: u32, close_to_leader: bool) -> bool {
     return if close_to_leader {
-        unsafe { LEADER_SLOT_ALLOW_LIST.get(&address).is_some() }
+        unsafe { LEADER_SLOT_DENY_LIST.get(&address).is_none() }
     } else {
         unsafe { FULL_SCHEDULE_ALLOW_LIST.get(&address).is_some() }
     }
@@ -144,7 +144,7 @@ fn try_process_packet(ctx: &XdpContext, close_to_leader: bool) -> Result<u32, ()
         if is_quic_zero_rtt(ctx, source_addr) {
             increment_counter(ctx, source_addr, StatType::ZeroRtt);
         }
-        let action = if is_allow_listed(source_addr, close_to_leader) {
+        let action = if is_allowed(source_addr, close_to_leader) {
             debug!(
                 ctx,
                 "ALLOW SRC IP: {:i}, DEST PORT: {}",

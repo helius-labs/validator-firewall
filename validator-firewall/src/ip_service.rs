@@ -1,28 +1,30 @@
 use aya::maps::{HashMap, Map};
 use cidr::Ipv4Cidr;
+use duckdb::params;
 use log::{debug, error, info};
 use rangemap::RangeInclusiveSet;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use std::collections::HashSet;
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr};
 use std::ops::RangeInclusive;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::Mutex;
 use tokio::time::sleep;
 
-pub struct ExternalAllowListClient {
+pub struct HttpDenyListClient {
     url: String,
 }
 
-impl ExternalAllowListClient {
+impl HttpDenyListClient {
     pub fn new(url: String) -> Self {
         Self { url }
     }
 }
 
-impl AllowListClient for ExternalAllowListClient {
-    async fn get_allow_list(&self) -> Result<Vec<Ipv4Cidr>, ()> {
+impl DenyListClient for HttpDenyListClient {
+    async fn get_deny_list(&self) -> Result<Vec<Ipv4Cidr>, ()> {
         let client = reqwest::Client::new();
         match client.get(&self.url).send().await {
             Ok(resp) => {
@@ -34,7 +36,7 @@ impl AllowListClient for ExternalAllowListClient {
                     );
                     Ok(allow_list)
                 } else {
-                    error!("Failed to decode allow list from external ip service.");
+                    error!("Failed to decode deny list from external ip service.");
                     Err(())
                 }
             }
@@ -43,60 +45,78 @@ impl AllowListClient for ExternalAllowListClient {
     }
 }
 
-pub struct GossipAllowListClient {
-    rpc_client: RpcClient,
+pub struct DuckDbDenyListClient {
+    conn: Arc<Mutex<duckdb::Connection>>,
+    query: String,
 }
 
-impl GossipAllowListClient {
-    pub fn new(rpc_client: RpcClient) -> Self {
-        Self { rpc_client }
-    }
-}
-impl AllowListClient for GossipAllowListClient {
-    async fn get_allow_list(&self) -> Result<Vec<Ipv4Cidr>, ()> {
-        let mut gossip_set = HashSet::new();
-        if let Ok(nodes) = self.rpc_client.get_cluster_nodes().await {
-            for node in nodes.iter().filter(|n| n.gossip.is_some()) {
-                match node.gossip.as_ref().unwrap() {
-                    SocketAddr::V4(sock) => {
-                        let cidr = Ipv4Cidr::new(*sock.ip(), 32).unwrap();
-                        gossip_set.insert(cidr);
-                    }
-                    SocketAddr::V6(_) => {}
-                }
-            }
-
-            if gossip_set.is_empty() {
-                return Err(());
-            }
-            Ok(gossip_set.into_iter().collect())
-        } else {
-            Err(())
+impl DuckDbDenyListClient {
+    pub fn new(query: String) -> Self {
+        Self {
+            conn: Arc::new(Mutex::new(duckdb::Connection::open_in_memory().unwrap())),
+            query,
         }
     }
+
+    async fn get_deny_list(&self) -> Result<Vec<Ipv4Cidr>, ()> {
+        info!("Executing query: {}", self.query);
+
+        let conn = self.conn.lock().await;
+        let mut stmt = conn.prepare(&self.query).unwrap();
+        let mut rows = stmt.query(params![]).unwrap();
+        let mut deny_list = Vec::new();
+        let mut count = 0;
+        while let Some(row) = rows.next().unwrap() {
+            let ip: u32 = row.get(0).unwrap();
+            let converted: Ipv4Addr = ip.into();
+
+            let cidr = Ipv4Cidr::new(converted, 32).unwrap();
+            deny_list.push(cidr);
+            count += 1;
+        }
+
+        info!("Retrieved {} IPs from query", count);
+        Ok(deny_list)
+    }
 }
 
-pub trait AllowListClient {
-    async fn get_allow_list(&self) -> Result<Vec<Ipv4Cidr>, ()>;
+impl DenyListClient for DuckDbDenyListClient {
+    async fn get_deny_list(&self) -> Result<Vec<Ipv4Cidr>, ()> {
+        self.get_deny_list().await
+    }
 }
 
-pub struct AllowListService<T: AllowListClient> {
-    allow_list_client: T,
+pub struct NoOpDenyListClient;
+
+impl DenyListClient for NoOpDenyListClient {
+    async fn get_deny_list(&self) -> Result<Vec<Ipv4Cidr>, ()> {
+        Ok(Vec::new())
+    }
 }
 
-impl<T: AllowListClient> AllowListService<T> {
+pub trait DenyListClient {
+    async fn get_deny_list(&self) -> Result<Vec<Ipv4Cidr>, ()>;
+}
+
+pub struct DenyListService<T: DenyListClient> {
+    deny_list_client: T,
+}
+
+impl<T: DenyListClient> DenyListService<T> {
     pub fn new(allow_list_client: T) -> Self {
-        Self { allow_list_client }
+        Self {
+            deny_list_client: allow_list_client,
+        }
     }
 
-    pub async fn get_allow_list(&self) -> Result<Vec<Ipv4Cidr>, ()> {
-        self.allow_list_client.get_allow_list().await
+    pub async fn get_deny_list(&self) -> Result<Vec<Ipv4Cidr>, ()> {
+        self.deny_list_client.get_deny_list().await
     }
 }
 
-pub struct AllowListStateUpdater<T: AllowListClient> {
+pub struct DenyListStateUpdater<T: DenyListClient> {
     exit_flag: Arc<AtomicBool>,
-    allow_service: Arc<AllowListService<T>>,
+    allow_service: Arc<DenyListService<T>>,
     allow_ranges: RangeInclusiveSet<u32>,
     deny_ranges: RangeInclusiveSet<u32>,
 }
@@ -107,10 +127,10 @@ pub fn to_range(ip: Ipv4Cidr) -> RangeInclusive<u32> {
     start_addr..=end_addr
 }
 
-impl<T: AllowListClient> AllowListStateUpdater<T> {
+impl<T: DenyListClient> DenyListStateUpdater<T> {
     pub fn new(
         exit_flag: Arc<AtomicBool>,
-        allow_service: Arc<AllowListService<T>>,
+        allow_service: Arc<DenyListService<T>>,
         static_overrides: Arc<(HashSet<Ipv4Cidr>, HashSet<Ipv4Cidr>)>,
     ) -> Self {
         Self {
@@ -136,42 +156,43 @@ impl<T: AllowListClient> AllowListStateUpdater<T> {
     }
 
     pub async fn run(&self, allow_list: Map) {
-        let mut allow_list: HashMap<_, u32, u8> = HashMap::try_from(allow_list).unwrap();
-        let mut dynamic_allow_set = HashSet::new();
+        let mut deny_list: HashMap<_, u32, u8> = HashMap::try_from(allow_list).unwrap();
+        let mut dynamic_deny_set = HashSet::new();
 
         while !self.exit_flag.load(Ordering::Relaxed) {
-            if let Ok(nodes) = self.allow_service.get_allow_list().await {
-                dynamic_allow_set.clear();
+            if let Ok(nodes) = self.allow_service.get_deny_list().await {
+                dynamic_deny_set.clear();
                 for ip4addr in nodes.iter().flat_map(|cidr| cidr.into_iter().addresses()) {
                     let ip_numeric: u32 = ip4addr.try_into().expect("Received invalid ip address");
-                    if !self.is_denied(&ip_numeric) {
-                        dynamic_allow_set.insert(ip_numeric);
+                    if !self.is_allowed(&ip_numeric) {
+                        dynamic_deny_set.insert(ip_numeric);
                     }
                 }
 
                 let to_remove = {
-                    allow_list
+                    deny_list
                         .iter()
                         .filter_map(|r| r.ok())
-                        .filter(|(x, _)| !dynamic_allow_set.contains(x) && !self.is_allowed(x))
+                        .filter(|(x, _)| !dynamic_deny_set.contains(x))
+                        .filter(|(x, _)| !self.is_denied(x))
                         .map(|x| x.0)
                         .collect::<Vec<u32>>()
                 };
-                debug!("Pruning {} ips from allow list", to_remove.len());
 
+                debug!("Pruning {} ips from deny list", to_remove.len());
                 for ip in to_remove {
-                    allow_list.remove(&ip).unwrap();
+                    deny_list.remove(&ip).unwrap();
                 }
 
                 {
-                    for ip in dynamic_allow_set.iter() {
-                        if !allow_list.get(ip, 0).is_ok() {
-                            allow_list.insert(ip, 0, 0).unwrap();
+                    for ip in dynamic_deny_set.iter() {
+                        if !deny_list.get(ip, 0).is_ok() {
+                            deny_list.insert(ip, 0, 0).unwrap();
                         }
                     }
                 }
             } else {
-                error!("Error fetching allow list from RPC");
+                error!("Error fetching deny list from RPC");
             }
 
             sleep(Duration::from_secs(10)).await;
