@@ -3,7 +3,7 @@ mod ip_service;
 mod ip_service_http;
 
 use crate::config::{load_static_overrides, NameAddressPair};
-use crate::ip_service::{AllowListService, AllowListStateUpdater, GossipAllowListClient};
+use crate::ip_service::{DenyListService, DenyListStateUpdater};
 use crate::ip_service_http::{create_router, IPState};
 use axum::{
     http::StatusCode,
@@ -74,29 +74,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::new((local_allow, local_deny))
     };
 
-    let gossip_svc = Arc::new(AllowListService::new(GossipAllowListClient::new(
-        RpcClient::new_with_commitment(rpc_endpoint.clone(), CommitmentConfig::processed()),
-    )));
-
     let app_state = Arc::new(IPState::new());
 
-    let co_app_state = app_state.clone();
-    let co_gossip_svc = gossip_svc.clone();
-    let co_exit_flag = exit_flag.clone();
-    tokio::spawn(async move {
-        while !co_exit_flag.load(std::sync::atomic::Ordering::Relaxed) {
-            match co_gossip_svc.get_allow_list().await {
-                Ok(nodes) => {
-                    let set_nodes: HashSet<Ipv4Cidr> = nodes.into_iter().collect();
-                    co_app_state.set_gossip_nodes(set_nodes).await;
-                }
-                Err(_) => {
-                    error!("Failed to retrieve gossip nodes.")
-                }
-            }
-            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
-        }
-    });
 
     for node in static_overrides.0.iter() {
         app_state.add_http_node(node.clone()).await;

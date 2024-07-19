@@ -33,6 +33,7 @@ validator-firewall-common = { path = "../validator-firewall-common", features = 
 serde_json = "1.0.117"
 hyper = "0.14.28"
 reqwest = "0.11.27"
+duckdb = { version="1.0.0", features=["bundled"]}
 
 [[bin]]
 name = "validator-firewall"

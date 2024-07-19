@@ -5,10 +5,7 @@ mod config;
 mod leader_tracker;
 
 use crate::config::{load_static_overrides, NameAddressPair};
-use crate::ip_service::{
-    AllowListClient, AllowListService, AllowListStateUpdater, ExternalAllowListClient,
-    GossipAllowListClient,
-};
+use crate::ip_service::{ DenyListService, DenyListStateUpdater, HttpDenyListClient, DuckDbDenyListClient, NoOpDenyListClient};
 use crate::leader_tracker::{CommandControlService, RPCLeaderTracker};
 use anyhow::Context;
 use aya::{
@@ -43,9 +40,11 @@ struct HVFConfig {
     leader_id: Option<String>,
     #[clap(short, long)]
     external_ip_service_url: Option<String>,
+    #[clap(short, long)]
+    query_file: Option<PathBuf>,
 }
 
-const ALLOW_LIST_MAP: &str = "hvf_allow_list";
+const DENY_LIST_MAP: &str = "hvf_deny_list";
 const PROTECTED_PORTS_MAP: &str = "hvf_protected_ports";
 const CONNECTION_STATS: &str = "hvf_stats";
 const CNC_ARRAY: &str = "hvf_cnc";
@@ -136,30 +135,48 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let ip_svc_handle = if let Some(url) = config.external_ip_service_url {
         info!("Using external IP service: {}", url);
-        let ip_service = ExternalAllowListClient::new(url);
-        let state_updater = AllowListStateUpdater::new(
+        let ip_service = HttpDenyListClient::new(url);
+        let state_updater = DenyListStateUpdater::new(
             gossip_exit,
-            Arc::new(AllowListService::new(ip_service)),
+            Arc::new(DenyListService::new(ip_service)),
             static_overrides.clone(),
         );
 
-        let map = bpf.take_map(ALLOW_LIST_MAP).unwrap();
+        let map = bpf.take_map(DENY_LIST_MAP).unwrap();
         let state_updater_handle = tokio::spawn(async move {
             state_updater.run(map).await;
         });
 
         state_updater_handle
-    } else {
-        info!("Sourcing allowlist from gossip");
-        let s_updater = AllowListStateUpdater::new(
+    } else if let Some(query_file) = config.query_file {
+        //read contents of file to string
+        let query = std::fs::read_to_string(query_file)?;
+
+        let s_updater = DenyListStateUpdater::new(
             gossip_exit,
-            Arc::new(AllowListService::new(GossipAllowListClient::new(
-                RpcClient::new(config.rpc_endpoint.clone()),
+            Arc::new(DenyListService::new(DuckDbDenyListClient::new(
+                query,
             ))),
             static_overrides.clone(),
         );
 
-        let map = bpf.take_map(ALLOW_LIST_MAP).unwrap();
+        let map = bpf.take_map(DENY_LIST_MAP).unwrap();
+        let gossip_handle = tokio::spawn(async move {
+            s_updater.run(map).await;
+        });
+        gossip_handle
+    } else {
+        //Default to no-op deny list client
+
+        warn!("No deny list client specified, only using static overrides");
+        let noop = NoOpDenyListClient {};
+        let s_updater = DenyListStateUpdater::new(
+            gossip_exit,
+            Arc::new(DenyListService::new(noop)),
+            static_overrides.clone(),
+        );
+
+        let map = bpf.take_map(DENY_LIST_MAP).unwrap();
         let gossip_handle = tokio::spawn(async move {
             s_updater.run(map).await;
         });

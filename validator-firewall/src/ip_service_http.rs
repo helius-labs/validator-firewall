@@ -46,17 +46,16 @@ impl IPState {
 
     pub async fn get_combined_nodes(&self) -> HashSet<Ipv4Cidr> {
         let mut combined_nodes = HashSet::new();
-        combined_nodes.extend(self.gossip_nodes.read().await.iter());
-        combined_nodes.extend(self.http_nodes.read().await.iter());
-        let block_list = self.blocked_nodes.read().await;
-        combined_nodes.retain(|node| !block_list.contains(node));
+        combined_nodes.extend(self.blocked_nodes.read().await.iter());
+        let allow_listed = self.http_nodes.read().await;
+        combined_nodes.retain(|node| !allow_listed.contains(node));
 
         combined_nodes
     }
 }
 
 pub fn create_router(state: Arc<IPState>, token: Option<String>) -> Router {
-    async fn get_allowed_nodes(state: State<Arc<IPState>>) -> impl IntoResponse {
+    async fn get_deny_list(state: State<Arc<IPState>>) -> impl IntoResponse {
         let nodes = state.get_combined_nodes().await;
         let nodes: Vec<String> = nodes.iter().map(|node| node.to_string()).collect();
         let body = serde_json::to_string(&nodes).unwrap();
@@ -114,8 +113,8 @@ pub fn create_router(state: Arc<IPState>, token: Option<String>) -> Router {
     }
 
     let app = Router::new()
-        .route("/", get(get_allowed_nodes))
-        .route("/nodes", get(get_allowed_nodes))
+        .route("/", get(get_deny_list))
+        .route("/nodes", get(get_deny_list))
         .with_state(state.clone());
     return if let Some(token) = token {
         info!("Adding authentication layer with token: {}", token);
