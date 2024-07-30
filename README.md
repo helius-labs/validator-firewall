@@ -66,7 +66,7 @@ RUST_LOG=info cargo xtask run --release -- --iface <iface> --static-overrides <p
 ## Leader Schedule Aware Blocking and External IP Service
 
 By default, the firewall will attempt to determine the identity of the validator by looking at "getIdentity" from the given
-RPC endpoint (default: http://localhost:8099).  If an external RPC endpoint is specified, the identity of the validator
+RPC endpoint (default: http://localhost:8899).  If an external RPC endpoint is specified, the identity of the validator
 being protected *MUST* be provided, or the firewall will not be able to determine if the validator is the leader or not.
 
 The default source of the allowed list of submitting IPs is based on Gossip.  This can also be overridden by using the 
