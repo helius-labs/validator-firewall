@@ -18,10 +18,11 @@ use network_types::{
     udp::UdpHdr,
 };
 
+const DENY_LIST_SIZE: u32 = 524288;
 
 //These are our data structures that we use to communicate with userspace
 #[map(name = "hvf_deny_list")]
-static LEADER_SLOT_DENY_LIST: HashMap<u32, u8> = HashMap::<u32, u8>::with_max_entries(8192, 0);
+static LEADER_SLOT_DENY_LIST: HashMap<u32, u8> = HashMap::<u32, u8>::with_max_entries(DENY_LIST_SIZE, 0);
 #[map(name = "hvf_always_allow")]
 static FULL_SCHEDULE_ALLOW_LIST: HashMap<u32, u8> = HashMap::<u32, u8>::with_max_entries(8192, 0);
 #[map(name = "hvf_stats")]

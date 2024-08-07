@@ -1,10 +1,10 @@
-use std::ops::Range;
 use aya::maps::{Array, Map};
 use log::{error, info, warn};
 use rangemap::RangeInclusiveSet;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::commitment_config::{CommitmentConfig, CommitmentLevel};
 use solana_sdk::epoch_info::EpochInfo;
+use std::ops::Range;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -181,7 +181,6 @@ impl RPCLeaderTracker {
                     let mut leader_ranges: RangeInclusiveSet<u64, u64> = RangeInclusiveSet::new();
                     for slot in my_slots {
                         let end: u64 = *slot as u64;
-
 
                         let range = end.saturating_sub(self.slot_buffer)..=end;
                         leader_ranges.insert(range);
