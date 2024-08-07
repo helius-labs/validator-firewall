@@ -5,7 +5,10 @@ mod config;
 mod leader_tracker;
 
 use crate::config::{load_static_overrides, NameAddressPair};
-use crate::ip_service::{ DenyListService, DenyListStateUpdater, HttpDenyListClient, DuckDbDenyListClient, NoOpDenyListClient};
+use crate::ip_service::{
+    DenyListService, DenyListStateUpdater, DuckDbDenyListClient, HttpDenyListClient,
+    NoOpDenyListClient,
+};
 use crate::leader_tracker::{CommandControlService, RPCLeaderTracker};
 use anyhow::Context;
 use aya::{
@@ -154,9 +157,7 @@ async fn main() -> Result<(), anyhow::Error> {
 
         let s_updater = DenyListStateUpdater::new(
             gossip_exit,
-            Arc::new(DenyListService::new(DuckDbDenyListClient::new(
-                query,
-            ))),
+            Arc::new(DenyListService::new(DuckDbDenyListClient::new(query))),
             static_overrides.clone(),
         );
 
@@ -187,7 +188,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let tracker = Arc::new(RPCLeaderTracker::new(
         exit.clone(),
         RpcClient::new(config.rpc_endpoint.clone()),
-        10,
+        12,
         config.leader_id,
     ));
     let bg_tracker = tracker.clone();

@@ -76,7 +76,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let app_state = Arc::new(IPState::new());
 
-
     for node in static_overrides.0.iter() {
         app_state.add_http_node(node.clone()).await;
     }

@@ -5,13 +5,16 @@ use log::{debug, error, info};
 use rangemap::RangeInclusiveSet;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use std::collections::HashSet;
-use std::net::{Ipv4Addr};
+use std::net::Ipv4Addr;
 use std::ops::RangeInclusive;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::time::sleep;
+
+const DENY_LIST_SIZE: u32 = 524288;
+const DYNAMIC_LIST_BUFFER: u32 = 1024;
 
 pub struct HttpDenyListClient {
     url: String,
@@ -119,6 +122,7 @@ pub struct DenyListStateUpdater<T: DenyListClient> {
     allow_service: Arc<DenyListService<T>>,
     allow_ranges: RangeInclusiveSet<u32>,
     deny_ranges: RangeInclusiveSet<u32>,
+    deny_cidrs: Arc<HashSet<Ipv4Cidr>>,
 }
 
 pub fn to_range(ip: Ipv4Cidr) -> RangeInclusive<u32> {
@@ -144,6 +148,7 @@ impl<T: DenyListClient> DenyListStateUpdater<T> {
             deny_ranges: {
                 RangeInclusiveSet::from_iter(static_overrides.1.iter().map(|ip| to_range(*ip)))
             },
+            deny_cidrs: Arc::new(static_overrides.1.clone()),
         }
     }
 
@@ -158,6 +163,26 @@ impl<T: DenyListClient> DenyListStateUpdater<T> {
     pub async fn run(&self, allow_list: Map) {
         let mut deny_list: HashMap<_, u32, u8> = HashMap::try_from(allow_list).unwrap();
         let mut dynamic_deny_set = HashSet::new();
+        {
+            let ips: Vec<Ipv4Addr> = self
+                .deny_cidrs
+                .iter()
+                .flat_map(|ip| ip.into_iter().addresses())
+                .collect();
+            if ips.len() > (DENY_LIST_SIZE - DYNAMIC_LIST_BUFFER) as usize {
+                error!("Deny list is too large to fit in map, static overrides will be truncated.");
+            }
+
+            for ip in ips
+                .iter()
+                .take((DENY_LIST_SIZE - DYNAMIC_LIST_BUFFER) as usize)
+            {
+                let ip_numeric: u32 = u32::from(*ip);
+                if !self.is_allowed(&ip_numeric) {
+                    deny_list.insert(ip_numeric, 0, 0).unwrap();
+                }
+            }
+        }
 
         while !self.exit_flag.load(Ordering::Relaxed) {
             if let Ok(nodes) = self.allow_service.get_deny_list().await {
@@ -169,6 +194,7 @@ impl<T: DenyListClient> DenyListStateUpdater<T> {
                     }
                 }
 
+                dynamic_deny_set.retain(|x| !self.is_allowed(x));
                 let to_remove = {
                     deny_list
                         .iter()
