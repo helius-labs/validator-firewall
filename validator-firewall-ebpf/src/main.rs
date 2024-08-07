@@ -4,7 +4,8 @@
 use aya_ebpf::{
     bindings::xdp_action,
     macros::{map, xdp},
-    maps::{Array, HashMap, PerCpuHashMap},
+    maps::{Array, HashMap, PerCpuHashMap, LpmTrie},
+    maps::lpm_trie::Key,
     programs::XdpContext,
 };
 use aya_log_ebpf::{debug, error, warn, info, trace};
@@ -21,7 +22,10 @@ use network_types::{
 
 //These are our data structures that we use to communicate with userspace
 #[map(name = "hvf_deny_list")]
-static LEADER_SLOT_DENY_LIST: HashMap<u32, u8> = HashMap::<u32, u8>::with_max_entries(8192, 0);
+static LEADER_SLOT_DENY_LIST: HashMap<u32, u8> = HashMap::<u32, u8>::with_max_entries(524288u32, 0);
+#[map(name = "hvf_deny_lpm")]
+static LEADER_SLOT_DENY_LPM: LpmTrie<u32, u32> = LpmTrie::<u32, u32>::with_max_entries(524288u32, 0);
+
 #[map(name = "hvf_always_allow")]
 static FULL_SCHEDULE_ALLOW_LIST: HashMap<u32, u8> = HashMap::<u32, u8>::with_max_entries(8192, 0);
 #[map(name = "hvf_stats")]
@@ -64,6 +68,7 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
 //Hide some unsafe blocks
 #[inline(always)]
 fn is_allowed(address: u32, close_to_leader: bool) -> bool {
+
     return if close_to_leader {
         unsafe { LEADER_SLOT_DENY_LIST.get(&address).is_none() }
     } else {
@@ -141,9 +146,13 @@ fn try_process_packet(ctx: &XdpContext, close_to_leader: bool) -> Result<u32, ()
         if !close_to_leader {
             increment_counter(ctx, source_addr, StatType::FarFromLeader);
         }
-        if is_quic_zero_rtt(ctx, source_addr) {
-            increment_counter(ctx, source_addr, StatType::ZeroRtt);
+
+        warn!(ctx, "Processing packet from address {:i}", source_addr);
+        let key = Key::new(32, source_addr);
+        if let Some(_) = LEADER_SLOT_DENY_LPM.get(&key) {
+            warn!(ctx, "Dropping packet from address {:i}/{} due to LPM deny list", source_addr, key.prefix_len);
         }
+
         let action = if is_allowed(source_addr, close_to_leader) {
             debug!(
                 ctx,
@@ -167,10 +176,4 @@ fn try_process_packet(ctx: &XdpContext, close_to_leader: bool) -> Result<u32, ()
     } else {
         Ok(xdp_action::XDP_PASS)
     };
-}
-
-//Placeholder
-#[inline(always)]
-fn is_quic_zero_rtt(ctx: &XdpContext, source_addr: u32) -> bool {
-    false
 }

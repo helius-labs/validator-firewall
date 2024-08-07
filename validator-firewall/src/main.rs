@@ -45,6 +45,7 @@ struct HVFConfig {
 }
 
 const DENY_LIST_MAP: &str = "hvf_deny_list";
+const DENY_LIST_LPM: &str = "hvf_deny_lpm";
 const PROTECTED_PORTS_MAP: &str = "hvf_protected_ports";
 const CONNECTION_STATS: &str = "hvf_stats";
 const CNC_ARRAY: &str = "hvf_cnc";
@@ -143,8 +144,9 @@ async fn main() -> Result<(), anyhow::Error> {
         );
 
         let map = bpf.take_map(DENY_LIST_MAP).unwrap();
+        let lpm_map = bpf.take_map(DENY_LIST_LPM).unwrap();
         let state_updater_handle = tokio::spawn(async move {
-            state_updater.run(map).await;
+            state_updater.run(map, lpm_map).await;
         });
 
         state_updater_handle
@@ -161,8 +163,9 @@ async fn main() -> Result<(), anyhow::Error> {
         );
 
         let map = bpf.take_map(DENY_LIST_MAP).unwrap();
+        let lpm_map = bpf.take_map(DENY_LIST_LPM).unwrap();
         let gossip_handle = tokio::spawn(async move {
-            s_updater.run(map).await;
+            s_updater.run(map, lpm_map).await;
         });
         gossip_handle
     } else {
@@ -177,8 +180,9 @@ async fn main() -> Result<(), anyhow::Error> {
         );
 
         let map = bpf.take_map(DENY_LIST_MAP).unwrap();
+        let lpm_map = bpf.take_map(DENY_LIST_LPM).unwrap();
         let gossip_handle = tokio::spawn(async move {
-            s_updater.run(map).await;
+            s_updater.run(map, lpm_map).await;
         });
         gossip_handle
     };
@@ -187,7 +191,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let tracker = Arc::new(RPCLeaderTracker::new(
         exit.clone(),
         RpcClient::new(config.rpc_endpoint.clone()),
-        10,
+        12,
         config.leader_id,
     ));
     let bg_tracker = tracker.clone();

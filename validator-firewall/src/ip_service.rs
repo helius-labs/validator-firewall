@@ -1,11 +1,12 @@
-use aya::maps::{HashMap, Map};
-use cidr::Ipv4Cidr;
+use aya::maps::lpm_trie::Key;
+use aya::maps::{HashMap, LpmTrie, Map};
+use cidr::{Cidr, Ipv4Cidr};
 use duckdb::params;
 use log::{debug, error, info};
 use rangemap::RangeInclusiveSet;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use std::collections::HashSet;
-use std::net::{Ipv4Addr};
+use std::net::Ipv4Addr;
 use std::ops::RangeInclusive;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -62,21 +63,29 @@ impl DuckDbDenyListClient {
         info!("Executing query: {}", self.query);
 
         let conn = self.conn.lock().await;
-        let mut stmt = conn.prepare(&self.query).unwrap();
-        let mut rows = stmt.query(params![]).unwrap();
-        let mut deny_list = Vec::new();
-        let mut count = 0;
-        while let Some(row) = rows.next().unwrap() {
-            let ip: u32 = row.get(0).unwrap();
-            let converted: Ipv4Addr = ip.into();
+        if let Ok(mut stmt) = conn.prepare(&self.query) {
+            if let Ok(mut rows) = stmt.query(params![]) {
+                let mut deny_list = Vec::new();
+                let mut count = 0;
+                while let Some(row) = rows.next().unwrap() {
+                    let ip: u32 = row.get(0).unwrap();
+                    let converted: Ipv4Addr = ip.into();
 
-            let cidr = Ipv4Cidr::new(converted, 32).unwrap();
-            deny_list.push(cidr);
-            count += 1;
+                    let cidr = Ipv4Cidr::new(converted, 32).unwrap();
+                    deny_list.push(cidr);
+                    count += 1;
+                }
+
+                info!("Retrieved {} IPs from query", count);
+                Ok(deny_list)
+            } else {
+                error!("Failed to execute query");
+                Err(())
+            }
+        } else {
+            error!("Faailed to prepare query");
+            Err(())
         }
-
-        info!("Retrieved {} IPs from query", count);
-        Ok(deny_list)
     }
 }
 
@@ -117,8 +126,9 @@ impl<T: DenyListClient> DenyListService<T> {
 pub struct DenyListStateUpdater<T: DenyListClient> {
     exit_flag: Arc<AtomicBool>,
     allow_service: Arc<DenyListService<T>>,
-    allow_ranges: RangeInclusiveSet<u32>,
-    deny_ranges: RangeInclusiveSet<u32>,
+    allow_ranges: Arc<RangeInclusiveSet<u32>>,
+    deny_ranges: Arc<RangeInclusiveSet<u32>>,
+    pub deny_cidrs: Arc<HashSet<Ipv4Cidr>>,
 }
 
 pub fn to_range(ip: Ipv4Cidr) -> RangeInclusive<u32> {
@@ -137,13 +147,16 @@ impl<T: DenyListClient> DenyListStateUpdater<T> {
             exit_flag,
             allow_service,
             allow_ranges: {
-                RangeInclusiveSet::from_iter(
+                Arc::new(RangeInclusiveSet::from_iter(
                     static_overrides.clone().0.iter().map(|ip| to_range(*ip)),
-                )
+                ))
             },
             deny_ranges: {
-                RangeInclusiveSet::from_iter(static_overrides.1.iter().map(|ip| to_range(*ip)))
+                Arc::new(RangeInclusiveSet::from_iter(
+                    static_overrides.1.iter().map(|ip| to_range(*ip)),
+                ))
             },
+            deny_cidrs: Arc::new(static_overrides.1.clone()),
         }
     }
 
@@ -155,12 +168,36 @@ impl<T: DenyListClient> DenyListStateUpdater<T> {
         self.allow_ranges.contains(addr)
     }
 
-    pub async fn run(&self, allow_list: Map) {
-        let mut deny_list: HashMap<_, u32, u8> = HashMap::try_from(allow_list).unwrap();
+    pub async fn run(&self, deny_list: Map, lpm_map: Map) {
+        let mut deny_list: HashMap<_, u32, u8> = HashMap::try_from(deny_list).unwrap();
+        let mut deny_list_lpm: LpmTrie<_, u32, u32> = LpmTrie::try_from(lpm_map).unwrap();
+
+        let local_allow_ranges = self.allow_ranges.clone();
         let mut dynamic_deny_set = HashSet::new();
+        {
+            for cidr in self.deny_cidrs.clone().iter() {
+                let key = Key::new(
+                    cidr.network_length() as u32,
+                    u32::from(cidr.first_address()),
+                );
+                info!(
+                    "Inserting {}/{} into deny list",
+                    cidr.first_address(),
+                    cidr.network_length()
+                );
+                deny_list_lpm.insert(&key, 1, 0).unwrap();
+            }
+        }
 
         while !self.exit_flag.load(Ordering::Relaxed) {
             if let Ok(nodes) = self.allow_service.get_deny_list().await {
+                info!("Initial deny list:");
+                deny_list_lpm.iter()
+                    .filter_map(|r| r.ok())
+                    .for_each(|(k,v) | {
+                        info!("{}/{} =>  {}", k.data(),k.prefix_len(), v);
+                    });
+
                 dynamic_deny_set.clear();
                 for ip4addr in nodes.iter().flat_map(|cidr| cidr.into_iter().addresses()) {
                     let ip_numeric: u32 = ip4addr.try_into().expect("Received invalid ip address");
@@ -169,28 +206,60 @@ impl<T: DenyListClient> DenyListStateUpdater<T> {
                     }
                 }
 
-                let to_remove = {
-                    deny_list
+                dynamic_deny_set.retain(|x| !local_allow_ranges.contains(x));
+                let to_remove_lpm = {
+                    deny_list_lpm
                         .iter()
                         .filter_map(|r| r.ok())
-                        .filter(|(x, _)| !dynamic_deny_set.contains(x))
-                        .filter(|(x, _)| !self.is_denied(x))
+                        .filter(|(x, val)| {
+                            x.prefix_len() == 32
+                                && !dynamic_deny_set.contains(&x.data().to_be())
+                                && val != &1
+                        })
                         .map(|x| x.0)
-                        .collect::<Vec<u32>>()
+                        .collect::<Vec<Key<u32>>>()
                 };
 
-                debug!("Pruning {} ips from deny list", to_remove.len());
-                for ip in to_remove {
-                    deny_list.remove(&ip).unwrap();
+                {
+                    to_remove_lpm.into_iter().for_each(|x| {
+                        deny_list_lpm.remove(&x).unwrap();
+                        info!(
+                            "Pruned {}/{} from deny list",
+                            x.data(),
+                            x.prefix_len()
+                        );
+                    });
                 }
-
                 {
                     for ip in dynamic_deny_set.iter() {
-                        if !deny_list.get(ip, 0).is_ok() {
-                            deny_list.insert(ip, 0, 0).unwrap();
+                        let key = Key::new(32, *ip);
+                        if !deny_list_lpm.get(&key, 0).is_ok() {
+                            deny_list_lpm.insert(&key, 0, 0).unwrap();
                         }
                     }
                 }
+
+                // let to_remove = {
+                //     deny_list
+                //         .iter()
+                //         .filter_map(|r| r.ok())
+                //         .filter(|(x, _)| !dynamic_deny_set.contains(x))
+                //         .map(|x| x.0)
+                //         .collect::<Vec<u32>>()
+                // };
+                //
+                // debug!("Pruning {} ips from deny list", to_remove.len());
+                // for ip in to_remove {
+                //     deny_list.remove(&ip).unwrap();
+                // }
+                //
+                // {
+                //     for ip in dynamic_deny_set.iter() {
+                //         if !deny_list.get(ip, 0).is_ok() {
+                //             deny_list.insert(ip, 0, 0).unwrap();
+                //         }
+                //     }
+                // }
             } else {
                 error!("Error fetching deny list from RPC");
             }

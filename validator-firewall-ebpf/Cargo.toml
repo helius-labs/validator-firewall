@@ -7,7 +7,7 @@ edition = "2021"
 aya-ebpf = "0.1.0"
 aya-log-ebpf = "0.1.0"
 validator-firewall-common = { path = "../validator-firewall-common" }
-network-types = "0.0.5"
+network-types = "0.0.6"
 
 [[bin]]
 name = "validator-firewall"
