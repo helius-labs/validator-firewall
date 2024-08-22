@@ -10,14 +10,16 @@ pub struct StatsService {
     exit: Arc<AtomicBool>,
     interval: u64,
     traffic_stats: Map,
+    host_label: Option<String>,
 }
 
 impl StatsService {
-    pub fn new(exit: Arc<AtomicBool>, interval: u64, traffic_stats: Map) -> Self {
+    pub fn new(exit: Arc<AtomicBool>, interval: u64, traffic_stats: Map, host_label: Option<String>) -> Self {
         Self {
             exit,
             interval,
             traffic_stats,
+            host_label,
         }
     }
 
@@ -54,6 +56,7 @@ impl StatsService {
 
     pub async fn run(&self) {
         let co_exit = self.exit.clone();
+        let host_label = &self.host_label.clone().unwrap_or_else(|| "unknown".to_string());
         let traffic_stats: PerCpuHashMap<_, u32, ConnectionStats> =
             PerCpuHashMap::try_from(&self.traffic_stats).unwrap();
         let report_interval = tokio::time::Duration::from_secs(self.interval);
@@ -79,6 +82,7 @@ impl StatsService {
 
             info!(
                 traffic_type = "All",
+                host_label = host_label,
                 rate = rate,
                 delta = delta,
                 total = all_sum,
@@ -105,6 +109,7 @@ impl StatsService {
             let delta = blocked_sum - blocked_last_sum;
             info!(
                 traffic_type = "Blocked",
+                host_label = host_label,
                 rate = rate,
                 delta = delta,
                 total = blocked_sum,
