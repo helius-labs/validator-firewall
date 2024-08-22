@@ -46,7 +46,7 @@ struct HVFConfig {
     #[clap(short, long)]
     query_file: Option<PathBuf>,
     #[clap(short, long)]
-    host_label: Option<String>
+    host_label: Option<String>,
 }
 
 const DENY_LIST_MAP: &str = "hvf_deny_list";
@@ -206,8 +206,12 @@ async fn main() -> Result<(), anyhow::Error> {
 
     //Start the stats service
     let stats_exit = exit.clone();
-    let stats_service =
-        stats_service::StatsService::new(stats_exit, 10, bpf.take_map(CONNECTION_STATS).unwrap(), config.host_label);
+    let stats_service = stats_service::StatsService::new(
+        stats_exit,
+        10,
+        bpf.take_map(CONNECTION_STATS).unwrap(),
+        config.host_label,
+    );
     let stats_handle = tokio::spawn(async move {
         stats_service.run().await;
     });

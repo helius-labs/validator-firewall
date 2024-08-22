@@ -14,7 +14,12 @@ pub struct StatsService {
 }
 
 impl StatsService {
-    pub fn new(exit: Arc<AtomicBool>, interval: u64, traffic_stats: Map, host_label: Option<String>) -> Self {
+    pub fn new(
+        exit: Arc<AtomicBool>,
+        interval: u64,
+        traffic_stats: Map,
+        host_label: Option<String>,
+    ) -> Self {
         Self {
             exit,
             interval,
@@ -56,7 +61,10 @@ impl StatsService {
 
     pub async fn run(&self) {
         let co_exit = self.exit.clone();
-        let host_label = &self.host_label.clone().unwrap_or_else(|| "unknown".to_string());
+        let host_label = &self
+            .host_label
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string());
         let traffic_stats: PerCpuHashMap<_, u32, ConnectionStats> =
             PerCpuHashMap::try_from(&self.traffic_stats).unwrap();
         let report_interval = tokio::time::Duration::from_secs(self.interval);
